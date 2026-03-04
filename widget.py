@@ -170,7 +170,7 @@ def get_game_info(pitches_df):
     return game_info.rename(columns={
         "game_id": "GAME_ID",
         "TOTAL_RUNS": "R",
-        "TOTAL_INNINGS": "INNINGS PITCHED",
+        "TOTAL_INNINGS": "IP",
     })
 
 # -----------------------
@@ -253,12 +253,12 @@ with tab1:
     ]["player_id"].iloc[0]
     
     pitches_throws = get_pitcher_pitches(pitcher_id)
-    #st.write("Pitches preview:")
-    #st.write(pitches_throws.head())
+    # st.write("Pitches preview:")
+    # st.write(pitches_throws.head())
     # st.write("Columns:")
     # st.write(list(pitches_throws.columns))
 
-    # st.write("One pitch example:", pitches_throws.iloc[0].to_dict())
+    #st.write("One pitch example:", pitches_throws.iloc[0].to_dict())
 
     # walks = pitches_throws[pitches_throws["k_or_bb"] == "Walk"]
     
@@ -297,7 +297,6 @@ with tab1:
                 BALL_COUNT=("pitch_call", lambda x: sum(x.isin(["BallCalled", "BallIntentional", "BallInDirt"]))),
                 SWINGING_STRIKE=("pitch_call", lambda x: sum(x == "StrikeSwinging")),
             ).reset_index()
-                        # Percentages
             return metrics
 
         def get_pitch_results(df):
@@ -305,13 +304,20 @@ with tab1:
                 NP = ("pitch_call", "count"),
                 HR = ("play_result",lambda x: sum(x=="HomeRun")),
                 BB = ("k_or_bb",lambda x: sum(x=="Walk")),
-                SO = ("play_result",lambda x: sum(x=="Strikeout")),
+                SO = ("k_or_bb",lambda x: sum(x=="Strikeout")),
                 H =("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun"])))
             ).reset_index()
             return results
         
+        def get_max_velo(df):
+            max_velo = df.groupby("game_id").agg(
+                MV =("rel_speed", "max"),
+            ).reset_index()
+            return max_velo
+        
         pitch_metrics_df = compute_pitch_metrics(pitches_throws)
         pitch_results_df = get_pitch_results(pitches_throws)
+        game_max_velo_df = get_max_velo(pitches_throws)
 
         # Merge metrics into game_info_df
         game_info_df = game_info_df.merge(
@@ -327,12 +333,20 @@ with tab1:
             right_on="game_id",
             how="left"
         )
+        
+        game_info_df = game_info_df.merge(
+            game_max_velo_df,
+            left_on="GAME_ID",
+            right_on="game_id",
+            how="left"
+        )
 
         enriched_games = game_context(
             game_info_df,
             games_df,
             selected_team
         )
+
 
         filtered_games = enriched_games[enriched_games["NP"] > 0]
         
@@ -341,8 +355,8 @@ with tab1:
             "OPPONENT",
             "LOCATION",
             "NP",
-            "MAX_SPEED",
-            "INNINGS PITCHED",
+            "MV",
+            "IP",
             "H",
             "R",
             "HR",
@@ -355,8 +369,9 @@ with tab1:
             "OPPONENT",
             "LOCATION",
             "NP",
+            "MV",
             "MAX_SPEED",
-            "INNINGS PITCHED",
+            "IP",
             "H",
             "R",
             "HR",

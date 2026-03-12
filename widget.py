@@ -270,6 +270,10 @@ with tab1:
     
     if not pitches_throws.empty:
 
+        # -----------------------
+        # Compute pitcher percentiles (background)
+        # -----------------------
+        pitcher_percentiles_df = compute_pitcher_velo_percentiles(pitches_throws)
         game_ids = pitches_throws["game_id"].dropna().unique().tolist()
 
         games_df = get_all_games()
@@ -315,6 +319,31 @@ with tab1:
             ).reset_index()
             return max_velo
         
+        # -----------------------
+        # Compute pitcher velocity percentiles (TEAM LEVEL)
+        # -----------------------
+        def compute_pitcher_velo_percentiles(pitches_df):
+
+            if pitches_df.empty:
+                return pd.DataFrame()
+
+            pitcher_velo = (
+                pitches_df.groupby("pitcher_id")
+                .agg(MAX_VELO=("rel_speed", "max"))
+                .reset_index()
+            )
+
+            if pitcher_velo.empty:
+                return pitcher_velo
+
+            # compute percentile ranking
+            pitcher_velo["VELO_PERCENTILE"] = (
+                pitcher_velo["MAX_VELO"]
+                .rank(pct=True) * 100
+            )
+
+            return pitcher_velo
+        
         pitch_metrics_df = compute_pitch_metrics(pitches_throws)
         pitch_results_df = get_pitch_results(pitches_throws)
         game_max_velo_df = get_max_velo(pitches_throws)
@@ -346,6 +375,20 @@ with tab1:
             games_df,
             selected_team
         )
+
+        # -----------------------
+        # Attach percentile to games (background)
+        # -----------------------
+        if not pitcher_percentiles_df.empty:
+
+            filtered_games = enriched_games.merge(
+                pitcher_percentiles_df,
+                left_on="pitcher_id",
+                right_on="pitcher_id",
+                how="left"
+            )
+        else:
+            filtered_games = enriched_games
 
 
         filtered_games = enriched_games[enriched_games["NP"] > 0]

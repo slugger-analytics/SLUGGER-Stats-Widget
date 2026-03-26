@@ -122,12 +122,125 @@ def get_all_players():
 # -----------------------
 # Get pitches
 # -----------------------
+@st.cache_data(show_spinner=False)
 def get_pitcher_pitches(pitcher_id):
-    resp = fetch("pitches", params={
-        "pitcher_id": pitcher_id,
-        "limit": 1000
-    })
-    return pd.DataFrame(resp.get("data", []))
+
+    all_data = []
+    offset = 0
+    limit = 100
+    max_pages = 5
+    pages = 0
+
+    while True:
+        resp = fetch("pitches", params={
+            "pitcher_id": pitcher_id,
+            "limit": limit,
+            "offset": offset
+        })
+
+        data = resp.get("data", [])
+
+        if not data:
+            break
+
+        all_data.extend(data)
+
+        pages += 1
+        if len(data) < limit or pages >= max_pages:
+            break
+
+        offset += limit
+
+    return pd.DataFrame(all_data)
+
+@st.cache_data(show_spinner=False)
+def get_hitter_atbats(batter_id):
+
+    all_data = []
+    offset = 0
+    limit = 100
+    max_pages = 5
+    pages = 0
+
+    while True:
+        resp = fetch("pitches", params={
+            "batter_id": batter_id,
+            "limit": limit,
+            "offset": offset
+        })
+
+        data = resp.get("data", [])
+
+        if not data:
+            break
+
+        all_data.extend(data)
+
+        pages += 1
+        if len(data) < limit or pages >= max_pages:
+            break
+
+        offset += limit
+
+    return pd.DataFrame(all_data)
+
+@st.cache_data(show_spinner=False)
+def get_team_atbats(team_hitter_ids):
+
+    dfs = []
+
+    for bid in team_hitter_ids:
+        df = get_hitter_atbats(bid)
+
+        if not df.empty:
+            dfs.append(df)
+
+    if dfs:
+        return pd.concat(dfs, ignore_index=True)
+
+    return pd.DataFrame()
+
+
+# -----------------------
+# Load all team pitches once
+# -----------------------
+@st.cache_data(show_spinner=False)
+def get_team_pitches(team_pitcher_ids):
+
+    dfs = []
+
+    for pid in team_pitcher_ids:
+        df = get_pitcher_pitches(pid)
+
+        if not df.empty:
+            dfs.append(df)
+
+    if dfs:
+        return pd.concat(dfs, ignore_index=True)
+
+    return pd.DataFrame()
+
+
+# -----------------------
+# Compute pitcher velocity percentiles
+# -----------------------
+def compute_pitcher_velo_percentiles(pitches_df):
+
+    if pitches_df.empty:
+        return pd.DataFrame()
+
+    pitcher_velo = (
+        pitches_df.groupby("pitcher_id")
+        .agg(MAX_VELO=("rel_speed", "max"))
+        .reset_index()
+    )
+
+    pitcher_velo["VELO_PERCENTILE"] = (
+        pitcher_velo["MAX_VELO"].rank(pct=True) * 100
+    )
+
+    return pitcher_velo
+
 
 # -----------------------
 # Get ALL games
@@ -135,6 +248,7 @@ def get_pitcher_pitches(pitcher_id):
 def get_all_games():
     resp = fetch("games", params={"limit": 1000})
     return pd.DataFrame(resp.get("data", []))
+
 
 # -----------------------
 # Throw speed stats
@@ -150,28 +264,66 @@ def game_pitch_speeds(pitches_df):
     ).reset_index()
 
     return grouped.rename(columns={"game_id": "GAME_ID"})
- 
+
 
 # -----------------------
 # Game aggregation 
 # -----------------------
 def get_game_info(pitches_df):
+
     if pitches_df.empty or "game_id" not in pitches_df.columns:
         return pd.DataFrame()
-        
+
     df = pitches_df.dropna(subset=["game_id"])
-    
-    game_info = df.groupby("game_id").agg(
+
+    game_info = df.groupby(["game_id", "PITCHER"]).agg(
         DATE=("date", "first"),
         TOTAL_RUNS=("runs_scored", "sum"),
         TOTAL_INNINGS=("inning", "max"),
     ).reset_index()
-    
+
     return game_info.rename(columns={
         "game_id": "GAME_ID",
         "TOTAL_RUNS": "R",
         "TOTAL_INNINGS": "IP",
     })
+
+def get_pitcher_season_stats(df):
+    
+    # One row per game per pitcher first (same dedup logic)
+    game_df = (
+        df.groupby(["game_id", "PITCHER"]).agg(
+            HR=("play_result", lambda x: sum(x == "HomeRun")),
+            BB=("k_or_bb", lambda x: sum(x == "Walk")),
+            SO=("k_or_bb", lambda x: sum(x == "Strikeout")),
+            H=("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun"]))),
+            R=("runs_scored", "sum"),
+            IP=("inning", "max"),
+            NP=("pitch_call", "count"),
+            MV=("rel_speed", "max"),
+        ).reset_index()
+    )
+
+    # Now aggregate to season level
+    season_df = game_df.groupby("PITCHER").agg(
+        G=("game_id", "count"),
+        IP=("IP", "sum"),
+        NP=("NP", "sum"),
+        H=("H", "sum"),
+        R=("R", "sum"),
+        HR=("HR", "sum"),
+        BB=("BB", "sum"),
+        SO=("SO", "sum"),
+        MV=("MV", "max"),
+    ).reset_index()
+
+    # Rate stats
+    season_df["K/9"] = ((season_df["SO"] / season_df["IP"]) * 9).round(2)
+    season_df["BB/9"] = ((season_df["BB"] / season_df["IP"]) * 9).round(2)
+    season_df["HR/9"] = ((season_df["HR"] / season_df["IP"]) * 9).round(2)
+
+    return season_df
+
 
 # -----------------------
 # Add opponent + location
@@ -179,16 +331,11 @@ def get_game_info(pitches_df):
 def game_context(game_info_df, games_df, selected_team):
 
     if games_df.empty:
-        st.write("games_df is empty")
         return game_info_df
 
     if "game_id" in games_df.columns:
         games_df = games_df.rename(columns={"game_id": "GAME_ID"})
-    elif "GAME_ID" not in games_df.columns:
-        st.write("No game_id column found in games_df")
-        st.write(games_df.columns)
-        return game_info_df
-    
+
     merged = game_info_df.merge(
         games_df,
         on="GAME_ID",
@@ -211,6 +358,45 @@ def game_context(game_info_df, games_df, selected_team):
     merged["LOCATION"] = merged.apply(get_location, axis=1)
 
     return merged
+
+def get_hitter_game_stats(df):
+
+    # Deduplicate to one row per plate appearance (last pitch of each PA)
+    pa_df = (
+        df.sort_values("pitch_of_pa")
+        .groupby(["game_id", "BATTER", "inning", "pa_of_inning"], as_index=False)
+        .last()  # last pitch of the PA = the outcome pitch
+    )
+
+    return pa_df.groupby(["game_id", "BATTER"]).agg(
+        DATE=("date", "first"),
+        PA=("pa_of_inning", "count"),
+        H=("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun"]))),
+        AB=("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun", "Out", "Error", "FieldersChoice"]))),
+        singles=("play_result", lambda x: sum(x == "Single")),
+        doubles=("play_result", lambda x: sum(x == "Double")),
+        triples=("play_result", lambda x: sum(x == "Triple")),
+        HR=("play_result", lambda x: sum(x == "HomeRun")),
+        BB=("k_or_bb", lambda x: sum(x == "Walk")),
+        SO=("k_or_bb", lambda x: sum(x == "Strikeout")),
+        HBP=("pitch_call", lambda x: sum(x == "HitByPitch")),
+        MAX_EV=("exit_speed", "max"),
+        AVG_EV=("exit_speed", "mean"),
+    ).reset_index()
+
+def compute_hitter_rate_stats(df):
+    df = df.copy()
+    df["AVG"] = (df["H"] / df["AB"]).round(3)
+    df["OBP"] = ((df["H"] + df["BB"] + df["HBP"]) / (df["AB"] + df["BB"] + df["HBP"])).round(3)
+    df["SLG"] = ((df["singles"] + 2*df["doubles"] + 3*df["triples"] + 4*df["HR"]) / df["AB"]).round(3)
+    df["OPS"] = (df["OBP"] + df["SLG"]).round(3)
+    df["MAX_EV"] = df["MAX_EV"].round(1)
+    df["AVG_EV"] = df["AVG_EV"].round(1)
+
+    # Drop the helper columns
+    df = df.drop(columns=["singles", "doubles", "triples"])
+
+    return df
 
 
 # -----------------------
@@ -236,208 +422,175 @@ tab1, tab2 = st.tabs(["Pitchers", "Hitters"])
 # Pitchers tab
 # -----------------------
 with tab1:
+
     st.subheader("Pitchers")
+
     st.dataframe(
-        filtered_pitchers.drop(columns=["player_id","TEAM"], errors="ignore"),
+        filtered_pitchers.drop(columns=["player_id", "TEAM"], errors="ignore"),
         use_container_width=True,
         hide_index=True
     )
 
-    selected_pitcher = st.selectbox(
-        "Select Pitcher",
-        filtered_pitchers["PLAYER"]
+    pitcher_options = ["All Pitchers"] + filtered_pitchers["PLAYER"].tolist()
+
+    selected_pitcher = st.selectbox("Select Pitcher", pitcher_options)
+
+    pitcher_lookup = filtered_pitchers[["player_id", "PLAYER"]].rename(
+        columns={"player_id": "pitcher_id", "PLAYER": "PITCHER"}
     )
 
-    pitcher_id = filtered_pitchers[
-        filtered_pitchers["PLAYER"] == selected_pitcher
-    ]["player_id"].iloc[0]
-    
-    pitches_throws = get_pitcher_pitches(pitcher_id)
-    # st.write("Pitches preview:")
-    # st.write(pitches_throws.head())
-    # st.write("Columns:")
-    # st.write(list(pitches_throws.columns))
+    team_pitcher_ids = filtered_pitchers["player_id"].tolist()
+    team_pitches = get_team_pitches(team_pitcher_ids)
+    team_pitches = team_pitches.merge(pitcher_lookup, on="pitcher_id", how="left")
 
-    #st.write("One pitch example:", pitches_throws.iloc[0].to_dict())
+    pitcher_percentiles_df = compute_pitcher_velo_percentiles(team_pitches)
 
-    # walks = pitches_throws[pitches_throws["k_or_bb"] == "Walk"]
-    
-    # # Home Runs
-    # home_runs = pitches_throws[pitches_throws["play_result"] == "HomeRun"]
-    
-    # st.write("Walks for this pitcher:", len(walks))
-    # st.write("Home Runs for this pitcher:", len(home_runs))
-    
+    # -----------------------
+    # Filter pitches
+    # -----------------------
+    if selected_pitcher == "All Pitchers":
+        pitches_throws = team_pitches
+    else:
+        pitcher_id = filtered_pitchers[
+            filtered_pitchers["PLAYER"] == selected_pitcher
+        ]["player_id"].iloc[0]
+
+        pitches_throws = team_pitches[team_pitches["pitcher_id"] == pitcher_id]
+
     if not pitches_throws.empty:
 
-        # -----------------------
-        # Compute pitcher percentiles (background)
-        # -----------------------
-        pitcher_percentiles_df = compute_pitcher_velo_percentiles(pitches_throws)
         game_ids = pitches_throws["game_id"].dropna().unique().tolist()
-
         games_df = get_all_games()
-
         games_df = games_df[games_df["game_id"].isin(game_ids)]
-
-        #st.write("One game example:", games_df.iloc[0].to_dict())
-        
 
         game_info_df = get_game_info(pitches_throws)
         speed_df = game_pitch_speeds(pitches_throws)
 
-        game_info_df = game_info_df.merge(
-            speed_df,
-            on="GAME_ID",
-            how="left"
-        )
+        game_info_df = game_info_df.merge(speed_df, on="GAME_ID", how="left")
 
         # -----------------------
-        # Compute Strike %, Ball %, Swinging Strike %
+        # Pitch metrics
         # -----------------------
         def compute_pitch_metrics(df):
-            metrics = df.groupby("game_id").agg(
+            return df.groupby("game_id").agg(
                 STRIKE_COUNT=("pitch_call", lambda x: sum(x.isin(["StrikeCalled", "StrikeSwinging"]))),
                 BALL_COUNT=("pitch_call", lambda x: sum(x.isin(["BallCalled", "BallIntentional", "BallInDirt"]))),
                 SWINGING_STRIKE=("pitch_call", lambda x: sum(x == "StrikeSwinging")),
             ).reset_index()
-            return metrics
 
         def get_pitch_results(df):
-            results = df.groupby("game_id").agg(
-                NP = ("pitch_call", "count"),
-                HR = ("play_result",lambda x: sum(x=="HomeRun")),
-                BB = ("k_or_bb",lambda x: sum(x=="Walk")),
-                SO = ("k_or_bb",lambda x: sum(x=="Strikeout")),
-                H =("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun"])))
+            return df.groupby("game_id").agg(
+                NP=("pitch_call", "count"),
+                HR=("play_result", lambda x: sum(x == "HomeRun")),
+                BB=("k_or_bb", lambda x: sum(x == "Walk")),
+                SO=("k_or_bb", lambda x: sum(x == "Strikeout")),
+                H=("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun"])))
             ).reset_index()
-            return results
-        
+
         def get_max_velo(df):
             max_velo = df.groupby("game_id").agg(
-                MV =("rel_speed", "max"),
+                MV=("rel_speed", "max")
             ).reset_index()
+            max_velo["MV"] = max_velo["MV"].round().astype(int)
             return max_velo
-        
-        # -----------------------
-        # Compute pitcher velocity percentiles (TEAM LEVEL)
-        # -----------------------
-        def compute_pitcher_velo_percentiles(pitches_df):
 
-            if pitches_df.empty:
-                return pd.DataFrame()
+        # -----------------------
+        # Rolling 5-game velo percentiles per pitcher
+        # -----------------------
+        def compute_rolling_velo_percentiles(df):
+            df = df.copy().sort_values("DATE")
 
-            pitcher_velo = (
-                pitches_df.groupby("pitcher_id")
-                .agg(MAX_VELO=("rel_speed", "max"))
-                .reset_index()
+            # Get each pitcher's last 5 games only
+            last5_per_pitcher = (
+                df.groupby("PITCHER", group_keys=False)
+                .apply(lambda g: g.tail(5))
             )
 
-            if pitcher_velo.empty:
-                return pitcher_velo
-
-            # compute percentile ranking
-            pitcher_velo["VELO_PERCENTILE"] = (
-                pitcher_velo["MAX_VELO"]
-                .rank(pct=True) * 100
+            # Rank MV across ALL pitchers' last 5 games combined
+            last5_per_pitcher["MV_PERCENTILE"] = (
+                last5_per_pitcher["MV"].rank(pct=True) * 100
             )
 
-            return pitcher_velo
-        
+            # Merge percentiles back onto the full df
+            df = df.merge(
+                last5_per_pitcher[["GAME_ID", "PITCHER", "MV_PERCENTILE"]],
+                on=["GAME_ID", "PITCHER"],
+                how="left"
+            )
+
+            return df
+
+        # -----------------------
+        # Merge all metrics
+        # -----------------------
         pitch_metrics_df = compute_pitch_metrics(pitches_throws)
         pitch_results_df = get_pitch_results(pitches_throws)
         game_max_velo_df = get_max_velo(pitches_throws)
 
-        # Merge metrics into game_info_df
-        game_info_df = game_info_df.merge(
-            pitch_metrics_df,
-            left_on="GAME_ID",
-            right_on="game_id",
-            how="left"
-        )
-        
-        game_info_df = game_info_df.merge(
-            pitch_results_df,
-            left_on="GAME_ID",
-            right_on="game_id",
-            how="left"
-        )
-        
-        game_info_df = game_info_df.merge(
-            game_max_velo_df,
-            left_on="GAME_ID",
-            right_on="game_id",
-            how="left"
+        game_info_df = (
+            game_info_df
+            .merge(pitch_metrics_df, left_on="GAME_ID", right_on="game_id", how="left")
+            .merge(pitch_results_df, left_on="GAME_ID", right_on="game_id", how="left")
+            .merge(game_max_velo_df, left_on="GAME_ID", right_on="game_id", how="left")
         )
 
-        enriched_games = game_context(
-            game_info_df,
-            games_df,
-            selected_team
-        )
-
-        # -----------------------
-        # Attach percentile to games (background)
-        # -----------------------
-        if not pitcher_percentiles_df.empty:
-
-            filtered_games = enriched_games.merge(
-                pitcher_percentiles_df,
-                left_on="pitcher_id",
-                right_on="pitcher_id",
-                how="left"
-            )
-        else:
-            filtered_games = enriched_games
-
-
+        enriched_games = game_context(game_info_df, games_df, selected_team)
         filtered_games = enriched_games[enriched_games["NP"] > 0]
-        
-        default_cols = [
-            "DATE",
-            "OPPONENT",
-            "LOCATION",
-            "NP",
-            "MV",
-            "IP",
-            "H",
-            "R",
-            "HR",
-            "BB",
-            "SO"
-        ]
 
-        allowed_cols = [
-            "DATE",
-            "OPPONENT",
-            "LOCATION",
-            "NP",
-            "MV",
-            "MAX_SPEED",
-            "IP",
-            "H",
-            "R",
-            "HR",
-            "BB",
-            "SO"
-        ]
+        # -----------------------
+        # Game log table
+        # -----------------------
+        st.subheader(f"{selected_pitcher} Game Info")
 
-        all_cols = list(filtered_games.columns)
+if selected_pitcher == "All Pitchers":
+    season_stats = get_pitcher_season_stats(pitches_throws)
 
-        selected_columns = st.multiselect(
-            "Select stats to display",
-            options=allowed_cols,
-            default=default_cols
-        )
+    allowed_cols = ["PITCHER", "G", "IP", "NP", "H", "R", "HR", "BB", "SO", "MV", "K/9", "BB/9", "HR/9"]
+    default_cols = ["PITCHER", "G", "IP", "H", "R", "HR", "BB", "SO", "MV", "K/9"]
 
-        clean_df = filtered_games[selected_columns]
+    selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
 
-        st.subheader(f"{selected_pitcher}'s Game Info")
-        st.dataframe(clean_df, use_container_width=True, hide_index=True)
-                
-    else:
-        st.write("No pitch data available for this pitcher.")
+    st.subheader("Pitcher Season Stats")
+    st.dataframe(
+        season_stats[selected_columns].reset_index(drop=True),
+        use_container_width=True,
+        hide_index=True
+    )
 
+else:
+    # individual pitcher game log
+    allowed_cols = ["DATE", "OPPONENT", "LOCATION", "NP", "MV", "MAX_SPEED", "IP", "H", "R", "HR", "BB", "SO"]
+    default_cols = ["DATE", "OPPONENT", "LOCATION", "NP", "MV", "IP", "H", "R", "HR", "BB", "SO"]
+
+    selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
+
+    display_df = compute_rolling_velo_percentiles(filtered_games).reset_index(drop=True)
+
+    def mv_label(row):
+        mv = row["MV"]
+        pct = row["MV_PERCENTILE"]
+        if pd.isna(pct):
+            return str(mv)
+        elif pct >= 75:
+            return f"🔥 {mv}"
+        elif pct <= 25:
+            return f"🧊 {mv}"
+        else:
+            return str(mv)
+
+    display_df["MV_DISPLAY"] = display_df.apply(mv_label, axis=1)
+    display_cols = [c if c != "MV" else "MV_DISPLAY" for c in selected_columns]
+    clean_df = display_df[display_cols].rename(columns={"MV_DISPLAY": "MV"})
+
+    st.subheader(f"{selected_pitcher} Game Log")
+    st.dataframe(
+        clean_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "MV": st.column_config.TextColumn("MV", help="🔥 top 25% | 🧊 bottom 25% of last 5 games")
+        }
+    )
 
 # -----------------------
 # Hitters tab
@@ -445,10 +598,58 @@ with tab1:
 with tab2:
     st.subheader("Hitters")
 
-    clean_hitters = filtered_hitters.drop(columns=["player_id","TEAM"], errors="ignore")
-
+    clean_hitters = filtered_hitters.drop(columns=["player_id", "TEAM"], errors="ignore")
     st.dataframe(clean_hitters, use_container_width=True, hide_index=True)
 
+    hitter_lookup = filtered_hitters[["player_id", "PLAYER"]].rename(
+        columns={"player_id": "batter_id", "PLAYER": "BATTER"}
+    )
+
+    team_hitter_ids = filtered_hitters["player_id"].tolist()
+    team_atbats = get_team_atbats(tuple(team_hitter_ids))
+    team_atbats = team_atbats.merge(hitter_lookup, on="batter_id", how="left")
+
+    if not team_atbats.empty:
+        hitter_game_stats = get_hitter_game_stats(team_atbats)
+        hitter_game_stats = compute_hitter_rate_stats(hitter_game_stats)
+
+        # Add opponent/location context
+        game_ids = team_atbats["game_id"].dropna().unique().tolist()
+        games_df = get_all_games()
+        games_df = games_df[games_df["game_id"].isin(game_ids)]
+        hitter_game_stats = game_context(
+            hitter_game_stats.rename(columns={"game_id": "GAME_ID"}),
+            games_df,
+            selected_team
+        )
+
+        hitter_options = ["All Hitters"] + filtered_hitters["PLAYER"].tolist()
+        selected_hitter = st.selectbox("Select Hitter", hitter_options)
+
+        allowed_cols = ["BATTER", "DATE", "OPPONENT", "LOCATION", "PA", "AB", "H", "HR", "BB", "SO", "HBP", "AVG", "OBP", "SLG", "OPS", "MAX_EV", "AVG_EV"]
+
+        default_cols = (
+            ["BATTER", "DATE", "OPPONENT", "LOCATION", "PA", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
+            if selected_hitter == "All Hitters"
+            else ["DATE", "OPPONENT", "LOCATION", "PA", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
+        )
+
+        selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
+
+        if selected_hitter == "All Hitters":
+            display_df = hitter_game_stats
+        else:
+            display_df = hitter_game_stats[hitter_game_stats["BATTER"] == selected_hitter]
+
+        st.subheader(f"{selected_hitter} Game Info")
+        st.dataframe(
+            display_df[selected_columns].reset_index(drop=True),
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+        st.write("No at-bat data available.")
 
 # ------------------------
 # Data Cleaning Functions

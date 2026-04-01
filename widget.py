@@ -56,20 +56,6 @@ SEASON_ID = 34052
 # API Fetch Function
 # -------------------
 
-# def fetch(endpoint):
-#     url = f"{BASE_URL}/{endpoint}"
-#     try:
-#         response = requests.get(url, headers=HEADERS)
-#         response.raise_for_status()
-#         return response.json()
-#     except requests.exceptions.HTTPError as e:
-#         if response.status_code == 404:
-#             print(f"404 Not Found: {url}")
-#         else:
-#             print(f"Error fetching {url}: {e}")
-#         return {}
-
-
 def fetch(endpoint, params=None):
     url = f"{BASE_URL}/{endpoint}"
     try:
@@ -314,7 +300,7 @@ def get_pitcher_season_stats(df):
         HR=("HR", "sum"),
         BB=("BB", "sum"),
         SO=("SO", "sum"),
-        MV=("MV", "max"),
+        MV=("MV", lambda x: int(round(x.max()))),
     ).reset_index()
 
     # Rate stats
@@ -383,6 +369,55 @@ def get_hitter_game_stats(df):
         MAX_EV=("exit_speed", "max"),
         AVG_EV=("exit_speed", "mean"),
     ).reset_index()
+
+def get_hitter_season_stats(df):
+
+    # Deduplicate to one row per plate appearance
+    pa_df = (
+        df.sort_values("pitch_of_pa")
+        .groupby(["game_id", "BATTER", "inning", "pa_of_inning"], as_index=False)
+        .last()
+    )
+
+    # Game level first
+    game_df = pa_df.groupby(["game_id", "BATTER"]).agg(
+        H=("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun"]))),
+        AB=("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun", "Out", "Error", "FieldersChoice"]))),
+        singles=("play_result", lambda x: sum(x == "Single")),
+        doubles=("play_result", lambda x: sum(x == "Double")),
+        triples=("play_result", lambda x: sum(x == "Triple")),
+        HR=("play_result", lambda x: sum(x == "HomeRun")),
+        BB=("k_or_bb", lambda x: sum(x == "Walk")),
+        SO=("k_or_bb", lambda x: sum(x == "Strikeout")),
+        HBP=("pitch_call", lambda x: sum(x == "HitByPitch")),
+        MAX_EV=("exit_speed", "max"),
+    ).reset_index()
+
+    # Season level
+    season_df = game_df.groupby("BATTER").agg(
+        G=("game_id", "count"),
+        AB=("AB", "sum"),
+        H=("H", "sum"),
+        singles=("singles", "sum"),
+        doubles=("doubles", "sum"),
+        triples=("triples", "sum"),
+        HR=("HR", "sum"),
+        BB=("BB", "sum"),
+        SO=("SO", "sum"),
+        HBP=("HBP", "sum"),
+        MAX_EV=("MAX_EV", "max"),
+    ).reset_index()
+
+    # Rate stats
+    season_df["AVG"] = (season_df["H"] / season_df["AB"]).round(3)
+    season_df["OBP"] = ((season_df["H"] + season_df["BB"] + season_df["HBP"]) / (season_df["AB"] + season_df["BB"] + season_df["HBP"])).round(3)
+    season_df["SLG"] = ((season_df["singles"] + 2*season_df["doubles"] + 3*season_df["triples"] + 4*season_df["HR"]) / season_df["AB"]).round(3)
+    season_df["OPS"] = (season_df["OBP"] + season_df["SLG"]).round(3)
+    season_df["MAX_EV"] = season_df["MAX_EV"].round(1)
+
+    season_df = season_df.drop(columns=["singles", "doubles", "triples"])
+
+    return season_df
 
 def compute_hitter_rate_stats(df):
     df = df.copy()
@@ -542,59 +577,79 @@ with tab1:
         # -----------------------
         st.subheader(f"{selected_pitcher} Game Info")
 
-if selected_pitcher == "All Pitchers":
-    season_stats = get_pitcher_season_stats(pitches_throws)
+    if selected_pitcher == "All Pitchers":
+        season_stats = get_pitcher_season_stats(pitches_throws)
 
-    allowed_cols = ["PITCHER", "G", "IP", "NP", "H", "R", "HR", "BB", "SO", "MV", "K/9", "BB/9", "HR/9"]
-    default_cols = ["PITCHER", "G", "IP", "H", "R", "HR", "BB", "SO", "MV", "K/9"]
+        season_stats["MV"] = season_stats["MV"].apply(lambda x: int(round(x)) if pd.notna(x) else x)
 
-    selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
+        # Rank MV across all pitchers
+        season_stats["MV_PERCENTILE"] = season_stats["MV"].rank(pct=True) * 100
 
-    st.subheader("Pitcher Season Stats")
-    st.dataframe(
-        season_stats[selected_columns].reset_index(drop=True),
-        use_container_width=True,
-        hide_index=True
-    )
+        def mv_season_label(row):
+            mv = row["MV"]
+            pct = row["MV_PERCENTILE"]
+            if pd.isna(pct):
+                return str(mv)
+            elif pct >= 75:
+                return f"🔥 {mv}"
+            elif pct <= 25:
+                return f"🧊 {mv}"
+            else:
+                return str(mv)
 
-else:
-    # individual pitcher game log
-    allowed_cols = ["DATE", "OPPONENT", "LOCATION", "NP", "MV", "MAX_SPEED", "IP", "H", "R", "HR", "BB", "SO"]
-    default_cols = ["DATE", "OPPONENT", "LOCATION", "NP", "MV", "IP", "H", "R", "HR", "BB", "SO"]
+        season_stats["MV"] = season_stats.apply(mv_season_label, axis=1)
+        season_stats = season_stats.drop(columns=["MV_PERCENTILE"])
 
-    selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
+        allowed_cols = ["PITCHER", "G", "IP", "NP", "H", "R", "HR", "BB", "SO", "MV"]
+        default_cols = ["PITCHER", "G", "IP", "H", "R", "HR", "BB", "SO", "MV"]
 
-    display_df = compute_rolling_velo_percentiles(filtered_games).reset_index(drop=True)
+        selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
 
-    def mv_label(row):
-        mv = row["MV"]
-        pct = row["MV_PERCENTILE"]
-        if pd.isna(pct):
-            return str(mv)
-        elif pct >= 75:
-            return f"🔥 {mv}"
-        elif pct <= 25:
-            return f"🧊 {mv}"
-        else:
-            return str(mv)
+        st.subheader("Pitcher Season Stats")
+        st.dataframe(
+            season_stats[selected_columns].reset_index(drop=True),
+            use_container_width=True,
+            hide_index=True
+        )
 
-    display_df["MV_DISPLAY"] = display_df.apply(mv_label, axis=1)
-    display_cols = [c if c != "MV" else "MV_DISPLAY" for c in selected_columns]
-    clean_df = display_df[display_cols].rename(columns={"MV_DISPLAY": "MV"})
+    else:
+        # individual pitcher game log
+        allowed_cols = ["DATE", "OPPONENT", "LOCATION", "NP", "MV", "MAX_SPEED", "IP", "H", "R", "HR", "BB", "SO"]
+        default_cols = ["DATE", "OPPONENT", "LOCATION", "NP", "MV", "IP", "H", "R", "HR", "BB", "SO"]
 
-    st.subheader(f"{selected_pitcher} Game Log")
-    st.dataframe(
-        clean_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "MV": st.column_config.TextColumn("MV", help="🔥 top 25% | 🧊 bottom 25% of last 5 games")
-        }
-    )
+        selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
+
+        display_df = compute_rolling_velo_percentiles(filtered_games).reset_index(drop=True)
+
+        def mv_label(row):
+            mv = row["MV"]
+            pct = row["MV_PERCENTILE"]
+            if pd.isna(pct):
+                return str(mv)
+            elif pct >= 75:
+                return f"🔥 {mv}"
+            elif pct <= 25:
+                return f"🧊 {mv}"
+            else:
+                return str(mv)
+
+        display_df["MV_DISPLAY"] = display_df.apply(mv_label, axis=1)
+        display_cols = [c if c != "MV" else "MV_DISPLAY" for c in selected_columns]
+        clean_df = display_df[display_cols].rename(columns={"MV_DISPLAY": "MV"})
+
+        st.subheader(f"{selected_pitcher} Game Log")
+        st.dataframe(
+            clean_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "MV": st.column_config.TextColumn("MV", help="🔥 top 25% | 🧊 bottom 25% of last 5 games")
+            }
+        )
 
 # -----------------------
 # Hitters tab
-# -----------------------
+# ------------------
 with tab2:
     st.subheader("Hitters")
 
@@ -610,105 +665,22 @@ with tab2:
     team_atbats = team_atbats.merge(hitter_lookup, on="batter_id", how="left")
 
     if not team_atbats.empty:
-        hitter_game_stats = get_hitter_game_stats(team_atbats)
-        hitter_game_stats = compute_hitter_rate_stats(hitter_game_stats)
+        season_stats = get_hitter_season_stats(team_atbats)
 
-        # Add opponent/location context
-        game_ids = team_atbats["game_id"].dropna().unique().tolist()
-        games_df = get_all_games()
-        games_df = games_df[games_df["game_id"].isin(game_ids)]
-        hitter_game_stats = game_context(
-            hitter_game_stats.rename(columns={"game_id": "GAME_ID"}),
-            games_df,
-            selected_team
-        )
-
-        hitter_options = ["All Hitters"] + filtered_hitters["PLAYER"].tolist()
-        selected_hitter = st.selectbox("Select Hitter", hitter_options)
-
-        allowed_cols = ["BATTER", "DATE", "OPPONENT", "LOCATION", "PA", "AB", "H", "HR", "BB", "SO", "HBP", "AVG", "OBP", "SLG", "OPS", "MAX_EV", "AVG_EV"]
-
-        default_cols = (
-            ["BATTER", "DATE", "OPPONENT", "LOCATION", "PA", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
-            if selected_hitter == "All Hitters"
-            else ["DATE", "OPPONENT", "LOCATION", "PA", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
-        )
+        allowed_cols = ["BATTER", "G", "AB", "H", "HR", "BB", "SO", "HBP", "AVG", "OBP", "SLG", "OPS", "MAX_EV"]
+        default_cols = ["BATTER", "G", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
 
         selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
 
-        if selected_hitter == "All Hitters":
-            display_df = hitter_game_stats
-        else:
-            display_df = hitter_game_stats[hitter_game_stats["BATTER"] == selected_hitter]
-
-        st.subheader(f"{selected_hitter} Game Info")
+        st.subheader("Hitter Season Stats")
         st.dataframe(
-            display_df[selected_columns].reset_index(drop=True),
+            season_stats[selected_columns].reset_index(drop=True),
             use_container_width=True,
             hide_index=True
         )
 
     else:
         st.write("No at-bat data available.")
-
-# ------------------------
-# Data Cleaning Functions
-# ------------------------
-
-
-
-# def clean_batting_df(df):
-#     """Clean and structure batting stats DataFrame."""
-#     if "teamname" in df.columns:
-#         df["teamname"] = df["teamname"].apply(lambda x: x.get("$t") if isinstance(x, dict) else x)
-    
-#     df = df.drop(columns=[col for col in ["playerlinkid", "playerid", "firstname", "lastname"] if col in df.columns])
-    
-#     rename_map = {"playername": "PLAYER", "teamname": "TEAM", "jersey": "JERSEY", "position": "P"}
-#     df = df.rename(columns=rename_map)
-#     df.columns = [rename_map.get(col, col.upper()) for col in df.columns]
-    
-    
-#     numeric_cols = ["AVG", "AB", "RUNS", "HITS", "HR", "RBI", "BB", "HP", "SO", "SF", "SB", "DP", "BIB", "TRIB", "OBP", "SLG"]
-#     for col in numeric_cols:
-#         if col in df.columns:
-#             df[col] = pd.to_numeric(df[col], errors="coerce")
-    
-#     # Reorganizing the order of the columns
-#     order = ["PLAYER", "JERSEY", "TEAM", "P", "AVG", "AB", "RUNS", "HITS", "HR", "RBI", "BB", "HP", "SO", "SF", "SB", "DP"]
-#     return df[[col for col in order if col in df.columns] + [col for col in df.columns if col not in order]]
-
-# def clean_pitching_df(df):
-#     """Clean and structure pitching stats DataFrame."""
-#     if "teamname" in df.columns:
-#         df["teamname"] = df["teamname"].apply(lambda x: x.get("$t") if isinstance(x, dict) else x)
-#     df = df.drop(columns=[col for col in ["playerlinkid", "playerid", "firstname", "lastname", "oobp", "oslg", "oavg"] if col in df.columns])
-#     rename_map = {"playername": "PLAYER", "teamname": "TEAM", "jersey": "JERSEY", "games": "G"}
-#     df = df.rename(columns=rename_map)
-#     df.columns = [rename_map.get(col, col.upper()) for col in df.columns]
-    
-#     numeric_cols = ["ERA", "G", "GS", "CG", "CGL", "IP", "HITS", "RUNS", "ER", "BB", "SO", "SV", "BSV", "WINS", "LOSSES", "BF", "SHO"]
-#     for col in numeric_cols:
-#         if col in df.columns:
-#             df[col] = pd.to_numeric(df[col], errors="coerce")
-    
-#     order = ["PLAYER", "JERSEY", "TEAM", "ERA", "G", "GS", "CG", "CGL", "IP", "HITS", "RUNS", "ER", "BB", "SO", "WINS", "LOSSES", "SV", "BSV"]
-#     return df[[col for col in order if col in df.columns] + [col for col in df.columns if col not in order]]
-
-# def clean_fielding_df(df):
-#     """Clean and structure fielding stats DataFrame."""
-#     if "teamname" in df.columns:
-#         df["teamname"] = df["teamname"].apply(lambda x: x.get("$t") if isinstance(x, dict) else x)
-#     df = df.drop(columns=[col for col in ["playerlinkid"] if col in df.columns])
-#     rename_map = {"name": "PLAYER", "jersey": "JERSEY", "teamname": "TEAM", "position": "P"}
-#     df = df.rename(columns=rename_map)
-#     df.columns = [rename_map.get(col, col.upper()) for col in df.columns]
-#     numeric_cols = ["FPCT", "GP", "PO", "A"]
-#     for col in numeric_cols:
-#         if col in df.columns:
-#             df[col] = pd.to_numeric(df[col], errors="coerce")
-#     order = ["PLAYER", "JERSEY", "TEAM", "P", "FPCT", "GP", "PO", "A"]
-#     return df[[col for col in order if col in df.columns] + [col for col in df.columns if col not in order]]
 
 # -----------------------
 # PDF Generation Function
@@ -782,95 +754,6 @@ with tab2:
 #     doc.build(elements)
 #     buffer.seek(0)
 #     return buffer
-
-
-# # --------------------
-# # Data Load & Cleaning
-# # --------------------
-
-# batting_data = clean_batting_df(get_batting_stats(SEASON_ID))
-# pitching_data = clean_pitching_df(get_pitching_stats(SEASON_ID))
-# fielding_data = clean_fielding_df(get_fielding_stats(SEASON_ID))
-
-# # -----------------------
-# # Streamlit UI Definition
-# # -----------------------
-
-# # Configure Streamlit page
-# st.set_page_config(page_title="Baseball Performance Widget", layout="wide")
-# PRIMARY_COLOR = "#c62127"
-# SECONDARY_COLOR = "#000c66"
-# TERTIARY_COLOR = "#0072eb"
-
-# # Display app title and subtitle
-# st.markdown(
-#     f"""
-#     <div style='background-color:{SECONDARY_COLOR}; padding:10px; border-radius:10px;'>
-#     <h1 style='color:{TERTIARY_COLOR}; text-align:center;'>Baseball Performance Widget</h1>
-#     <p style='color:white; text-align:center;'>Filter and View Key Player Statistics for Batting, Fielding, and Pitching</p>
-#     </div>
-#     """,
-#     unsafe_allow_html=True
-# )
-
-# # --------------------------
-# # Sidebar Filters (3 columns)
-# # --------------------------
-
-# col1, col2, col3 = st.columns(3)
-
-# with col1:
-#     st.subheader("Batting Stats")
-#     batting_team = st.selectbox("Select Team (Batting)", ["All"] + sorted(batting_data["TEAM"].unique()))
-#     batting_player = st.selectbox("Select Player (Batting)", ["All"] + sorted(batting_data["PLAYER"].unique()))
-#     batting_position = st.selectbox("Select Position (Batting)", ["All"] + sorted(batting_data["P"].dropna().unique()))
-#     batting_sort = st.selectbox("Sort By (Batting)", ["None"] + [col for col in batting_data.columns if pd.api.types.is_numeric_dtype(batting_data[col])])
-
-# with col2:
-#     st.subheader("Fielding Stats")
-#     fielding_team = st.selectbox("Select Team (Fielding)", ["All"] + sorted(fielding_data["TEAM"].unique()))
-#     fielding_player = st.selectbox("Select Player (Fielding)", ["All"] + sorted(fielding_data["PLAYER"].unique()))
-#     fielding_position = st.selectbox("Select Position (Fielding)", ["All"] + sorted(fielding_data["P"].dropna().unique()))
-#     fielding_sort = st.selectbox("Sort By (Fielding)", ["None"] + [col for col in fielding_data.columns if pd.api.types.is_numeric_dtype(fielding_data[col])])
-
-# with col3:
-#     st.subheader("Pitching Stats")
-#     pitching_team = st.selectbox("Select Team (Pitching)", ["All"] + sorted(pitching_data["TEAM"].unique()))
-#     pitching_player = st.selectbox("Select Player (Pitching)", ["All"] + sorted(pitching_data["PLAYER"].unique()))
-#     pitching_sort = st.selectbox("Sort By (Pitching)", ["None"] + [col for col in pitching_data.columns if pd.api.types.is_numeric_dtype(pitching_data[col])])
-#     st.markdown("<div style='height: 85px;'></div>", unsafe_allow_html=True)
-
-# # --------------------
-# # Filter the datasets
-# # --------------------
-
-# batting_filtered = batting_data.copy()
-# if batting_team != "All":
-#     batting_filtered = batting_filtered[batting_filtered["TEAM"] == batting_team]
-# if batting_player != "All":
-#     batting_filtered = batting_filtered[batting_filtered["PLAYER"] == batting_player]
-# if batting_position != "All":
-#     batting_filtered = batting_filtered[batting_filtered["P"] == batting_position]
-# if batting_sort != "None":
-#     batting_filtered = batting_filtered.sort_values(by=batting_sort, ascending=False)
-
-# fielding_filtered = fielding_data.copy()
-# if fielding_team != "All":
-#     fielding_filtered = fielding_filtered[fielding_filtered["TEAM"] == fielding_team]
-# if fielding_player != "All":
-#     fielding_filtered = fielding_filtered[fielding_filtered["PLAYER"] == fielding_player]
-# if fielding_position != "All":
-#     fielding_filtered = fielding_filtered[fielding_filtered["P"] == fielding_position]
-# if fielding_sort != "None":
-#     fielding_filtered = fielding_filtered.sort_values(by=fielding_sort, ascending=False)
-
-# pitching_filtered = pitching_data.copy()
-# if pitching_team != "All":
-#     pitching_filtered = pitching_filtered[pitching_filtered["TEAM"] == pitching_team]
-# if pitching_player != "All":
-#     pitching_filtered = pitching_filtered[pitching_filtered["PLAYER"] == pitching_player]
-# if pitching_sort != "None":
-#     pitching_filtered = pitching_filtered.sort_values(by=pitching_sort, ascending=False)
 
 # # --------------------
 # # Download PDF Report

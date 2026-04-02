@@ -663,10 +663,15 @@ with tab2:
 
     if not team_atbats.empty:
         season_stats = get_hitter_season_stats(team_atbats)
-        bat_hand_lookup = filtered_hitters[["PLAYER", "BAT HAND"]].rename(columns={"PLAYER": "BATTER"})
+        bat_hand_lookup = (
+            filtered_hitters[["PLAYER", "BAT HAND"]]
+            .drop_duplicates(subset="PLAYER")
+            .rename(columns={"PLAYER": "BATTER"})
+        )
         season_stats = season_stats.merge(bat_hand_lookup, on="BATTER", how="left")
+        season_stats = season_stats.drop_duplicates(subset="BATTER")
 
-        hitter_options = ["All Hitters"] + filtered_hitters["PLAYER"].tolist()
+        hitter_options = ["All Hitters"] + filtered_hitters["PLAYER"].unique().tolist()
         selected_hitter = st.selectbox("Select Hitter", hitter_options)
 
         if selected_hitter != "All Hitters":

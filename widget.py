@@ -533,7 +533,8 @@ with tab1:
             # Get each pitcher's last 5 games only
             last5_per_pitcher = (
                 df.groupby("PITCHER", group_keys=False)
-                .apply(lambda g: g.tail(5))
+                .tail(5)
+                .copy()
             )
 
             # Rank MV across ALL pitchers' last 5 games combined
@@ -551,7 +552,7 @@ with tab1:
             return df
         
         # -----------------------
-        # Rolling 5-game velo percentiles per pitcher
+        # Rolling 5-game BB percentiles per pitcher
         # -----------------------
         def compute_rolling_BB_percentiles(df):
             df = df.copy().sort_values("DATE")
@@ -559,7 +560,8 @@ with tab1:
             # Get each pitcher's last 5 games only
             last5_per_pitcher = (
                 df.groupby("PITCHER", group_keys=False)
-                .apply(lambda g: g.tail(5))
+                .tail(5)
+                .copy()
             )
 
             # Rank MV across ALL pitchers' last 5 games combined
@@ -568,11 +570,8 @@ with tab1:
             )
 
             # Merge percentiles back onto the full df
-            df = df.merge(
-                last5_per_pitcher[["GAME_ID", "PITCHER", "BB_PERCENTILE"]],
-                on=["GAME_ID", "PITCHER"],
-                how="left"
-            )
+            df["MV_PERCENTILE"] = last5_per_pitcher["MV_PERCENTILE"]
+            df["MV_PERCENTILE"] = df["MV_PERCENTILE"].fillna(pd.NA)
 
             return df
 

@@ -450,6 +450,7 @@ selected_team = st.selectbox("Select a Team", all_teams)
 filtered_pitchers = pitchers_df[pitchers_df["TEAM"] == selected_team]
 filtered_hitters = hitters_df[hitters_df["TEAM"] == selected_team]
 
+
 tab1, tab2 = st.tabs(["Pitchers", "Hitters"])
 
 
@@ -459,12 +460,6 @@ tab1, tab2 = st.tabs(["Pitchers", "Hitters"])
 with tab1:
 
     st.subheader("Pitchers")
-
-    st.dataframe(
-        filtered_pitchers.drop(columns=["player_id", "TEAM"], errors="ignore"),
-        use_container_width=True,
-        hide_index=True
-    )
 
     pitcher_options = ["All Pitchers"] + filtered_pitchers["PLAYER"].tolist()
 
@@ -580,6 +575,9 @@ with tab1:
     if selected_pitcher == "All Pitchers":
         season_stats = get_pitcher_season_stats(pitches_throws)
 
+        pitch_hand_lookup = filtered_pitchers[["PLAYER", "PITCH HAND"]].rename(columns={"PLAYER": "PITCHER"})
+        season_stats = season_stats.merge(pitch_hand_lookup, on="PITCHER", how="left")
+
         season_stats["MV"] = season_stats["MV"].apply(lambda x: int(round(x)) if pd.notna(x) else x)
 
         # Rank MV across all pitchers
@@ -600,8 +598,8 @@ with tab1:
         season_stats["MV"] = season_stats.apply(mv_season_label, axis=1)
         season_stats = season_stats.drop(columns=["MV_PERCENTILE"])
 
-        allowed_cols = ["PITCHER", "G", "IP", "NP", "H", "R", "HR", "BB", "SO", "MV"]
-        default_cols = ["PITCHER", "G", "IP", "H", "R", "HR", "BB", "SO", "MV"]
+        allowed_cols = ["PITCHER", "PITCH HAND", "G", "IP", "NP", "H", "R", "HR", "BB", "SO", "MV"]
+        default_cols = ["PITCHER", "PITCH HAND", "G", "IP", "H", "R", "HR", "BB", "SO", "MV"]
 
         selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
 
@@ -637,7 +635,7 @@ with tab1:
         display_cols = [c if c != "MV" else "MV_DISPLAY" for c in selected_columns]
         clean_df = display_df[display_cols].rename(columns={"MV_DISPLAY": "MV"})
 
-        st.subheader(f"{selected_pitcher} Game Log")
+        st.subheader(f"{selected_pitcher} Game By Game Stats")
         st.dataframe(
             clean_df,
             use_container_width=True,
@@ -653,11 +651,10 @@ with tab1:
 with tab2:
     st.subheader("Hitters")
 
-    clean_hitters = filtered_hitters.drop(columns=["player_id", "TEAM"], errors="ignore")
-    st.dataframe(clean_hitters, use_container_width=True, hide_index=True)
-
-    hitter_lookup = filtered_hitters[["player_id", "PLAYER"]].rename(
-        columns={"player_id": "batter_id", "PLAYER": "BATTER"}
+    hitter_lookup = (
+    filtered_hitters[["player_id", "PLAYER"]]
+    .drop_duplicates(subset="player_id") 
+    .rename(columns={"player_id": "batter_id", "PLAYER": "BATTER"})
     )
 
     team_hitter_ids = filtered_hitters["player_id"].tolist()
@@ -666,18 +663,55 @@ with tab2:
 
     if not team_atbats.empty:
         season_stats = get_hitter_season_stats(team_atbats)
+        bat_hand_lookup = filtered_hitters[["PLAYER", "BAT HAND"]].rename(columns={"PLAYER": "BATTER"})
+        season_stats = season_stats.merge(bat_hand_lookup, on="BATTER", how="left")
 
-        allowed_cols = ["BATTER", "G", "AB", "H", "HR", "BB", "SO", "HBP", "AVG", "OBP", "SLG", "OPS", "MAX_EV"]
-        default_cols = ["BATTER", "G", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
+        hitter_options = ["All Hitters"] + filtered_hitters["PLAYER"].tolist()
+        selected_hitter = st.selectbox("Select Hitter", hitter_options)
 
-        selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
+        if selected_hitter != "All Hitters":
+            hitter_id = filtered_hitters[filtered_hitters["PLAYER"] == selected_hitter]["player_id"].iloc[0]
 
-        st.subheader("Hitter Season Stats")
-        st.dataframe(
-            season_stats[selected_columns].reset_index(drop=True),
-            use_container_width=True,
-            hide_index=True
-        )
+            hitter_atbats = team_atbats[team_atbats["batter_id"] == hitter_id]
+
+            if not hitter_atbats.empty:
+                game_log = get_hitter_game_stats(hitter_atbats)
+                game_log = compute_hitter_rate_stats(game_log)
+
+                games_df = get_all_games()
+
+                # Opponent and location Context
+                game_ids = hitter_atbats["game_id"].dropna().unique().tolist()
+                games_df = games_df[games_df["game_id"].isin(game_ids)]
+
+                game_log = game_log.rename(columns={"game_id" : "GAME_ID"})
+                game_log= game_context(game_log, games_df, selected_team)
+
+                allowed_cols = ["DATE", "OPPONENT", "LOCATION", "AB", "H", "HR", "BB", "SO", "HBP", "AVG", "OBP", "SLG", "OPS"]
+                default_cols = ["DATE", "OPPONENT", "LOCATION", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
+                selected_hitter_cols = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols, key="hitter_game_log_cols")
+
+                st.subheader(f"{selected_hitter} Game By Game Stats")
+                st.dataframe(
+                    game_log[selected_hitter_cols].reset_index(drop=True),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.write("No game data available for this hitter")
+                
+        else:
+            allowed_cols = ["BATTER", "BAT HAND", "G", "AB", "H", "HR", "BB", "SO", "HBP", "AVG", "OBP", "SLG", "OPS", "MAX_EV"]
+            default_cols = ["BATTER", "BAT HAND", "G", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
+
+            selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
+
+            st.subheader("Hitter's Season Stats")
+            st.dataframe(
+                season_stats[selected_columns].reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True
+            )
 
     else:
         st.write("No at-bat data available.")

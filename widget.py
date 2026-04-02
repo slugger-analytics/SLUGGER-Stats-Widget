@@ -644,7 +644,6 @@ with tab1:
 
         selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
 
-        st.subheader("Pitcher Season Stats")
         st.dataframe(
             season_stats[selected_columns].reset_index(drop=True),
             use_container_width=True,

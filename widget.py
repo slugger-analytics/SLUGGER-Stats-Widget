@@ -437,7 +437,7 @@ def compute_hitter_rate_stats(df):
 # -----------------------
 # UI
 # -----------------------
-st.title("League Stats Testing")
+st.title("ALPB League Stats")
 
 pitchers_df, hitters_df = get_all_players()
 
@@ -549,6 +549,33 @@ with tab1:
             )
 
             return df
+        
+        # -----------------------
+        # Rolling 5-game velo percentiles per pitcher
+        # -----------------------
+        def compute_rolling_BB_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_pitcher = (
+                df.groupby("PITCHER", group_keys=False)
+                .apply(lambda g: g.tail(5))
+            )
+
+            # Rank MV across ALL pitchers' last 5 games combined
+            last5_per_pitcher["BB_PERCENTILE"] = (
+                last5_per_pitcher["BB"].rank(pct=True, ascending=False) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df = df.merge(
+                last5_per_pitcher[["GAME_ID", "PITCHER", "BB_PERCENTILE"]],
+                on=["GAME_ID", "PITCHER"],
+                how="left"
+            )
+
+            return df
+
 
         # -----------------------
         # Merge all metrics
@@ -579,9 +606,11 @@ with tab1:
         season_stats = season_stats.merge(pitch_hand_lookup, on="PITCHER", how="left")
 
         season_stats["MV"] = season_stats["MV"].apply(lambda x: int(round(x)) if pd.notna(x) else x)
+        season_stats["BB"] = season_stats["BB"].apply(lambda x: int(round(x)) if pd.notna(x) else x)
 
         # Rank MV across all pitchers
         season_stats["MV_PERCENTILE"] = season_stats["MV"].rank(pct=True) * 100
+        season_stats["BB_PERCENTILE"] = season_stats["BB"].rank(pct=True, ascending=False) * 100
 
         def mv_season_label(row):
             mv = row["MV"]
@@ -594,8 +623,21 @@ with tab1:
                 return f"🧊 {mv}"
             else:
                 return str(mv)
+            
+        def bb_season_label(row):
+            bb = row["BB"]
+            pct = row["BB_PERCENTILE"]
+            if pd.isna(pct):
+                return str(bb)
+            elif pct >= 75:
+                return f"🔥 {bb}"
+            elif pct <= 25:
+                return f"🧊 {bb}"
+            else:
+                return str(bb)
 
         season_stats["MV"] = season_stats.apply(mv_season_label, axis=1)
+        season_stats["BB"] = season_stats.apply(bb_season_label, axis=1)
         season_stats = season_stats.drop(columns=["MV_PERCENTILE"])
 
         allowed_cols = ["PITCHER", "PITCH HAND", "G", "IP", "NP", "H", "R", "HR", "BB", "SO", "MV"]

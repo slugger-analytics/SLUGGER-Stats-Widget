@@ -564,17 +564,90 @@ with tab1:
                 .copy()
             )
 
-            # Rank MV across ALL pitchers' last 5 games combined
+            # Rank BB across ALL pitchers' last 5 games combined
             last5_per_pitcher["BB_PERCENTILE"] = (
                 last5_per_pitcher["BB"].rank(pct=True, ascending=False) * 100
             )
 
             # Merge percentiles back onto the full df
-            df["MV_PERCENTILE"] = last5_per_pitcher["MV_PERCENTILE"]
-            df["MV_PERCENTILE"] = df["MV_PERCENTILE"].fillna(pd.NA)
+            df["BB_PERCENTILE"] = last5_per_pitcher["BB_PERCENTILE"]
+            df["BB_PERCENTILE"] = df["BB_PERCENTILE"].fillna(pd.NA)
 
             return df
+        
+        # -----------------------
+        # Rolling 5-game HR percentiles per pitcher
+        # -----------------------
+        def compute_rolling_HR_percentiles(df):
+            df = df.copy().sort_values("DATE")
 
+            # Get each pitcher's last 5 games only
+            last5_per_pitcher = (
+                df.groupby("PITCHER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank HR across ALL pitchers' last 5 games combined
+            last5_per_pitcher["HR_PERCENTILE"] = (
+                last5_per_pitcher["HR"].rank(pct=True, ascending=False) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df["HR_PERCENTILE"] = last5_per_pitcher["HR_PERCENTILE"]
+            df["HR_PERCENTILE"] = df["HR_PERCENTILE"].fillna(pd.NA)
+
+            return df
+        
+        # -----------------------
+        # Rolling 5-game R percentiles per pitcher
+        # -----------------------
+        def compute_rolling_R_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_pitcher = (
+                df.groupby("PITCHER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank R across ALL pitchers' last 5 games combined
+            last5_per_pitcher["R_PERCENTILE"] = (
+                last5_per_pitcher["R"].rank(pct=True, ascending=False) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df["R_PERCENTILE"] = last5_per_pitcher["R_PERCENTILE"]
+            df["R_PERCENTILE"] = df["R_PERCENTILE"].fillna(pd.NA)
+
+            return df
+        
+        # -----------------------
+        # Rolling 5-game H percentiles per pitcher
+        # -----------------------
+        def compute_rolling_H_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_pitcher = (
+                df.groupby("PITCHER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank H across ALL pitchers' last 5 games combined
+            last5_per_pitcher["H_PERCENTILE"] = (
+                last5_per_pitcher["H"].rank(pct=True, ascending=False) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df["H_PERCENTILE"] = last5_per_pitcher["H_PERCENTILE"]
+            df["H_PERCENTILE"] = df["H_PERCENTILE"].fillna(pd.NA)
+
+            return df
+        
+        
 
         # -----------------------
         # Merge all metrics
@@ -607,9 +680,12 @@ with tab1:
         season_stats["MV"] = season_stats["MV"].apply(lambda x: int(round(x)) if pd.notna(x) else x)
         season_stats["BB"] = season_stats["BB"].apply(lambda x: int(round(x)) if pd.notna(x) else x)
 
-        # Rank MV across all pitchers
+        # Rank stats across all pitchers
         season_stats["MV_PERCENTILE"] = season_stats["MV"].rank(pct=True) * 100
         season_stats["BB_PERCENTILE"] = season_stats["BB"].rank(pct=True, ascending=False) * 100
+        season_stats["HR_PERCENTILE"] = season_stats["HR"].rank(pct=True, ascending=False) * 100
+        season_stats["R_PERCENTILE"] = season_stats["R"].rank(pct=True, ascending=False) * 100
+        season_stats["H_PERCENTILE"] = season_stats["H"].rank(pct=True, ascending=False) * 100
 
         def mv_season_label(row):
             mv = row["MV"]
@@ -634,10 +710,56 @@ with tab1:
                 return f"🧊 {bb}"
             else:
                 return str(bb)
+            
+        def hr_season_label(row):
+            hr = row["HR"]
+            pct = row["HR_PERCENTILE"]
+            if pd.isna(pct):
+                return str(hr)
+            elif pct >= 75:
+                return f"🔥 {hr}"
+            elif pct <= 25:
+                return f"🧊 {hr}"
+            else:
+                return str(hr)
+            
+        def r_season_label(row):
+            r = row["R"]
+            pct = row["R_PERCENTILE"]
+            if pd.isna(pct):
+                return str(r)
+            elif pct >= 75:
+                return f"🔥 {r}"
+            elif pct <= 25:
+                return f"🧊 {r}"
+            else:
+                return str(r)
+            
+        def h_season_label(row):
+            h = row["H"]
+            pct = row["H_PERCENTILE"]
+            if pd.isna(pct):
+                return str(h)
+            elif pct >= 75:
+                return f"🔥 {h}"
+            elif pct <= 25:
+                return f"🧊 {h}"
+            else:
+                return str(h)
+
 
         season_stats["MV"] = season_stats.apply(mv_season_label, axis=1)
         season_stats["BB"] = season_stats.apply(bb_season_label, axis=1)
+        season_stats["HR"] = season_stats.apply(hr_season_label, axis=1)
+        season_stats["R"] = season_stats.apply(r_season_label, axis=1)
+        season_stats["H"] = season_stats.apply(h_season_label, axis=1)
         season_stats = season_stats.drop(columns=["MV_PERCENTILE"])
+        season_stats = season_stats.drop(columns=["BB_PERCENTILE"])
+        season_stats = season_stats.drop(columns=["HR_PERCENTILE"])
+        season_stats = season_stats.drop(columns=["R_PERCENTILE"])
+        season_stats = season_stats.drop(columns=["H_PERCENTILE"])
+
+
 
         allowed_cols = ["PITCHER", "PITCH HAND", "G", "IP", "NP", "H", "R", "HR", "BB", "SO", "MV"]
         default_cols = ["PITCHER", "PITCH HAND", "G", "IP", "H", "R", "HR", "BB", "SO", "MV"]
@@ -658,18 +780,6 @@ with tab1:
         selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
 
         display_df = compute_rolling_velo_percentiles(filtered_games).reset_index(drop=True)
-
-        def mv_label(row):
-            mv = row["MV"]
-            pct = row["MV_PERCENTILE"]
-            if pd.isna(pct):
-                return str(mv)
-            elif pct >= 75:
-                return f"🔥 {mv}"
-            elif pct <= 25:
-                return f"🧊 {mv}"
-            else:
-                return str(mv)
 
         display_df["MV_DISPLAY"] = display_df.apply(mv_label, axis=1)
         display_cols = [c if c != "MV" else "MV_DISPLAY" for c in selected_columns]
@@ -711,8 +821,223 @@ with tab2:
         season_stats = season_stats.merge(bat_hand_lookup, on="BATTER", how="left")
         season_stats = season_stats.drop_duplicates(subset="BATTER")
 
+        # -----------------------
+        # Rolling 5-game AVG percentiles per hiter
+        # -----------------------
+        def compute_rolling_AVG_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_hitter = (
+                df.groupby("HITTER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank MV across ALL pitchers' last 5 games combined
+            last5_per_hitter["AVG_PERCENTILE"] = (
+                last5_per_hitter["AVG"].rank(pct=True) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df = df.merge(
+                last5_per_hitter[["GAME_ID", "HITTER", "AVG_PERCENTILE"]],
+                on=["GAME_ID", "HITTER"],
+                how="left"
+            )
+
+            return df
+        
+        # -----------------------
+        # Rolling 5-game AVG percentiles per hitter
+        # -----------------------
+        def compute_rolling_OBP_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_hitter = (
+                df.groupby("HITTER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank MV across ALL pitchers' last 5 games combined
+            last5_per_hitter["OBP_PERCENTILE"] = (
+                last5_per_hitter["OBP"].rank(pct=True) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df = df.merge(
+                last5_per_hitter[["GAME_ID", "HITTER", "OBP_PERCENTILE"]],
+                on=["GAME_ID", "HITTER"],
+                how="left"
+            )
+
+            return df
+        
+        # -----------------------
+        # Rolling 5-game SLG percentiles per hitter
+        # -----------------------
+        def compute_rolling_SLG_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_hitter = (
+                df.groupby("HITTER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank MV across ALL pitchers' last 5 games combined
+            last5_per_hitter["SLG_PERCENTILE"] = (
+                last5_per_hitter["SLG"].rank(pct=True) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df = df.merge(
+                last5_per_hitter[["GAME_ID", "HITTER", "SLG_PERCENTILE"]],
+                on=["GAME_ID", "HITTER"],
+                how="left"
+            )
+
+            return df
+        
+        # -----------------------
+        # Rolling 5-game OPS percentiles per hitter
+        # -----------------------
+        def compute_rolling_OPS_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_hitter = (
+                df.groupby("HITTER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank MV across ALL pitchers' last 5 games combined
+            last5_per_hitter["OPS_PERCENTILE"] = (
+                last5_per_hitter["OPS"].rank(pct=True) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df = df.merge(
+                last5_per_hitter[["GAME_ID", "HITTER", "OPS_PERCENTILE"]],
+                on=["GAME_ID", "HITTER"],
+                how="left"
+            )
+
+            return df
+        
+        # -----------------------
+        # Rolling 5-game BB percentiles per hitter
+        # -----------------------
+        def compute_rolling_BB_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_hitter = (
+                df.groupby("HITTER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank MV across ALL pitchers' last 5 games combined
+            last5_per_hitter["BB_PERCENTILE"] = (
+                last5_per_hitter["BB"].rank(pct=True) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df = df.merge(
+                last5_per_hitter[["GAME_ID", "HITTER", "BB_PERCENTILE"]],
+                on=["GAME_ID", "HITTER"],
+                how="left"
+            )
+
+            return df
+        
+        # -----------------------
+        # Rolling 5-game HR percentiles per hitter
+        # -----------------------
+        def compute_rolling_HR_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_hitter = (
+                df.groupby("HITTER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank MV across ALL pitchers' last 5 games combined
+            last5_per_hitter["HR_PERCENTILE"] = (
+                last5_per_hitter["AVG"].rank(pct=True) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df = df.merge(
+                last5_per_hitter[["GAME_ID", "HITTER", "HR_PERCENTILE"]],
+                on=["GAME_ID", "HITTER"],
+                how="left"
+            )
+
+            return df
+        
+        # -----------------------
+        # Rolling 5-game H percentiles per hitter
+        # -----------------------
+        def compute_rolling_H_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_hitter = (
+                df.groupby("HITTER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank MV across ALL pitchers' last 5 games combined
+            last5_per_hitter["H_PERCENTILE"] = (
+                last5_per_hitter["H"].rank(pct=True) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df = df.merge(
+                last5_per_hitter[["GAME_ID", "HITTER", "H_PERCENTILE"]],
+                on=["GAME_ID", "HITTER"],
+                how="left"
+            )
+
+            return df
+        
+                # -----------------------
+        # Rolling 5-game SO percentiles per hitter
+        # -----------------------
+        def compute_rolling_SO_percentiles(df):
+            df = df.copy().sort_values("DATE")
+
+            # Get each pitcher's last 5 games only
+            last5_per_hitter = (
+                df.groupby("HITTER", group_keys=False)
+                .tail(5)
+                .copy()
+            )
+
+            # Rank HR across ALL pitchers' last 5 games combined
+            last5_per_hitter["SO_PERCENTILE"] = (
+                last5_per_hitter["SO"].rank(pct=True, ascending=False) * 100
+            )
+
+            # Merge percentiles back onto the full df
+            df["SO_PERCENTILE"] = last5_per_hitter["SO_PERCENTILE"]
+            df["SO_PERCENTILE"] = df["SO_PERCENTILE"].fillna(pd.NA)
+
+            return df
+
+
         hitter_options = ["All Hitters"] + filtered_hitters["PLAYER"].unique().tolist()
         selected_hitter = st.selectbox("Select Hitter", hitter_options)
+
 
         if selected_hitter != "All Hitters":
             hitter_id = filtered_hitters[filtered_hitters["PLAYER"] == selected_hitter]["player_id"].iloc[0]
@@ -746,6 +1071,129 @@ with tab2:
                 st.write("No game data available for this hitter")
                 
         else:
+            season_stats["AVG_PERCENTILE"] = season_stats["AVG"].rank(pct=True) * 100
+            season_stats["OBP_PERCENTILE"] = season_stats["OBP"].rank(pct=True) * 100
+            season_stats["SLG_PERCENTILE"] = season_stats["SLG"].rank(pct=True) * 100
+            season_stats["OPS_PERCENTILE"] = season_stats["OPS"].rank(pct=True) * 100
+            season_stats["H_PERCENTILE"] = season_stats["H"].rank(pct=True) * 100
+            season_stats["HR_PERCENTILE"] = season_stats["H"].rank(pct=True) * 100
+            season_stats["BB_PERCENTILE"] = season_stats["BB"].rank(pct=True, ascending=False) * 100
+            season_stats["SO_PERCENTILE"] = season_stats["SO"].rank(pct=True, ascending=False) * 100
+
+            def avg_season_label(row):
+                avg = row["AVG"]
+                pct = row["AVG_PERCENTILE"]
+                if pd.isna(pct):
+                    return str(avg)
+                elif pct >= 75:
+                    return f"🔥 {avg}"
+                elif pct <= 25:
+                    return f"🧊 {avg}"
+                else:
+                    return str(avg)
+                
+            def obp_season_label(row):
+                obp = row["OBP"]
+                pct = row["OBP_PERCENTILE"]
+                if pd.isna(pct):
+                    return str(obp)
+                elif pct >= 75:
+                    return f"🔥 {obp}"
+                elif pct <= 25:
+                    return f"🧊 {obp}"
+                else:
+                    return str(obp)
+                
+            def slg_season_label(row):
+                slg = row["SLG"]
+                pct = row["SLG_PERCENTILE"]
+                if pd.isna(pct):
+                    return str(slg)
+                elif pct >= 75:
+                    return f"🔥 {slg}"
+                elif pct <= 25:
+                    return f"🧊 {slg}"
+                else:
+                    return str(slg)
+                
+            def ops_season_label(row):
+                ops = row["OPS"]
+                pct = row["OPS_PERCENTILE"]
+                if pd.isna(pct):
+                    return str(ops)
+                elif pct >= 75:
+                    return f"🔥 {ops}"
+                elif pct <= 25:
+                    return f"🧊 {ops}"
+                else:
+                    return str(ops)
+                
+            def h_season_label(row):
+                h = row["H"]
+                pct = row["H_PERCENTILE"]
+                if pd.isna(pct):
+                    return str(h)
+                elif pct >= 75:
+                    return f"🔥 {h}"
+                elif pct <= 25:
+                    return f"🧊 {h}"
+                else:
+                    return str(h)
+                
+            def hr_season_label(row):
+                hr = row["HR"]
+                pct = row["HR_PERCENTILE"]
+                if pd.isna(pct):
+                    return str(hr)
+                elif pct >= 75:
+                    return f"🔥 {hr}"
+                elif pct <= 25:
+                    return f"🧊 {hr}"
+                else:
+                    return str(hr)
+                
+            def bb_season_label(row):
+                bb = row["BB"]
+                pct = row["BB_PERCENTILE"]
+                if pd.isna(pct):
+                    return str(bb)
+                elif pct >= 75:
+                    return f"🔥 {bb}"
+                elif pct <= 25:
+                    return f"🧊 {bb}"
+                else:
+                    return str(bb)
+            
+            def so_season_label(row):
+                so = row["SO"]
+                pct = row["SO_PERCENTILE"]
+                if pd.isna(pct):
+                    return str(so)
+                elif pct >= 75:
+                    return f"🔥 {so}"
+                elif pct <= 25:
+                    return f"🧊 {so}"
+                else:
+                    return str(so)
+                
+            season_stats["AVG"] = season_stats.apply(avg_season_label, axis=1)
+            season_stats["OBP"] = season_stats.apply(obp_season_label, axis=1)
+            season_stats["SLG"] = season_stats.apply(slg_season_label, axis=1)
+            season_stats["OPS"] = season_stats.apply(ops_season_label, axis=1)
+            season_stats["HR"] = season_stats.apply(hr_season_label, axis=1)
+            season_stats["BB"] = season_stats.apply(bb_season_label, axis=1)
+            season_stats["SO"] = season_stats.apply(so_season_label, axis=1)
+            season_stats["H"] = season_stats.apply(h_season_label, axis=1)
+            season_stats = season_stats.drop(columns=["AVG_PERCENTILE"])
+            season_stats = season_stats.drop(columns=["OBP_PERCENTILE"])
+            season_stats = season_stats.drop(columns=["SLG_PERCENTILE"])
+            season_stats = season_stats.drop(columns=["OPS_PERCENTILE"])
+            season_stats = season_stats.drop(columns=["BB_PERCENTILE"])
+            season_stats = season_stats.drop(columns=["HR_PERCENTILE"])
+            season_stats = season_stats.drop(columns=["SO_PERCENTILE"])
+            season_stats = season_stats.drop(columns=["H_PERCENTILE"])
+                
+
             allowed_cols = ["BATTER", "BAT HAND", "G", "AB", "H", "HR", "BB", "SO", "HBP", "AVG", "OBP", "SLG", "OPS", "MAX_EV"]
             default_cols = ["BATTER", "BAT HAND", "G", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
 
@@ -756,7 +1204,7 @@ with tab2:
                 season_stats[selected_columns].reset_index(drop=True),
                 use_container_width=True,
                 hide_index=True
-            )
+        )
 
     else:
         st.write("No at-bat data available.")

@@ -540,8 +540,6 @@ with tab1:
         enriched_games = game_context(game_info_df, games_df, selected_team)
         filtered_games = enriched_games[enriched_games["NP"] > 0].copy()
 
-        st.subheader(f"{selected_pitcher} Game Info")
-
     # -----------------------
     # All Pitchers: season stats with hot/cold
     # -----------------------
@@ -583,7 +581,8 @@ with tab1:
 
         filtered_config = {k: v for k, v in pitcher_stat_config.items() if k in hot_cold_stats}
         season_stats = apply_hot_cold_labels(season_stats, filtered_config)
-
+        
+        st.subheader("Pitcher's Season Stats")
         st.dataframe(
             season_stats[selected_columns].reset_index(drop=True),
             use_container_width=True,

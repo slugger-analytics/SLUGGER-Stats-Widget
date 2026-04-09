@@ -19,8 +19,6 @@ Dependencies:
 # Imports and Configuration
 # -------------------------
 
-# Core libraries
-
 import streamlit as st
 import pandas as pd
 import requests
@@ -41,13 +39,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Get API key from environment
 if os.path.exists(".env"):
     load_dotenv()
     API_KEY = os.getenv("API_KEY")
 else:
     API_KEY = st.secrets["API_KEY"]
-    
+
 BASE_URL = "https://1ywv9dczq5.execute-api.us-east-2.amazonaws.com/ALPBAPI"
 HEADERS = {"x-api-key": API_KEY}
 SEASON_ID = 34052
@@ -80,7 +77,7 @@ def get_all_players():
 
     if not players:
         return pd.DataFrame(), pd.DataFrame()
-    
+
     df = pd.DataFrame(players)
 
     df = (
@@ -100,17 +97,17 @@ def get_all_players():
 
     hitters_df = (
         df[df["is_hitter"]]
-        .drop(columns=["is_pitcher","is_hitter", "PITCH HAND"], errors="ignore")
+        .drop(columns=["is_pitcher", "is_hitter", "PITCH HAND"], errors="ignore")
     )
 
     return pitchers_df, hitters_df
+
 
 # -----------------------
 # Get pitches
 # -----------------------
 @st.cache_data(show_spinner=False)
 def get_pitcher_pitches(pitcher_id):
-
     all_data = []
     offset = 0
     limit = 100
@@ -123,25 +120,20 @@ def get_pitcher_pitches(pitcher_id):
             "limit": limit,
             "offset": offset
         })
-
         data = resp.get("data", [])
-
         if not data:
             break
-
         all_data.extend(data)
-
         pages += 1
         if len(data) < limit or pages >= max_pages:
             break
-
         offset += limit
 
     return pd.DataFrame(all_data)
 
+
 @st.cache_data(show_spinner=False)
 def get_hitter_atbats(batter_id):
-
     all_data = []
     offset = 0
     limit = 100
@@ -154,36 +146,27 @@ def get_hitter_atbats(batter_id):
             "limit": limit,
             "offset": offset
         })
-
         data = resp.get("data", [])
-
         if not data:
             break
-
         all_data.extend(data)
-
         pages += 1
         if len(data) < limit or pages >= max_pages:
             break
-
         offset += limit
 
     return pd.DataFrame(all_data)
 
+
 @st.cache_data(show_spinner=False)
 def get_team_atbats(team_hitter_ids):
-
     dfs = []
-
     for bid in team_hitter_ids:
         df = get_hitter_atbats(bid)
-
         if not df.empty:
             dfs.append(df)
-
     if dfs:
         return pd.concat(dfs, ignore_index=True)
-
     return pd.DataFrame()
 
 
@@ -192,18 +175,13 @@ def get_team_atbats(team_hitter_ids):
 # -----------------------
 @st.cache_data(show_spinner=False)
 def get_team_pitches(team_pitcher_ids):
-
     dfs = []
-
     for pid in team_pitcher_ids:
         df = get_pitcher_pitches(pid)
-
         if not df.empty:
             dfs.append(df)
-
     if dfs:
         return pd.concat(dfs, ignore_index=True)
-
     return pd.DataFrame()
 
 
@@ -211,7 +189,6 @@ def get_team_pitches(team_pitcher_ids):
 # Compute pitcher velocity percentiles
 # -----------------------
 def compute_pitcher_velo_percentiles(pitches_df):
-
     if pitches_df.empty:
         return pd.DataFrame()
 
@@ -220,11 +197,9 @@ def compute_pitcher_velo_percentiles(pitches_df):
         .agg(MAX_VELO=("rel_speed", "max"))
         .reset_index()
     )
-
     pitcher_velo["VELO_PERCENTILE"] = (
         pitcher_velo["MAX_VELO"].rank(pct=True) * 100
     )
-
     return pitcher_velo
 
 
@@ -244,24 +219,20 @@ def game_pitch_speeds(pitches_df):
         return pd.DataFrame()
 
     df = pitches_df.dropna(subset=["throw_speed", "game_id"])
-
     grouped = df.groupby("game_id").agg(
         MAX_SPEED=("throw_speed", "max")
     ).reset_index()
-
     return grouped.rename(columns={"game_id": "GAME_ID"})
 
 
 # -----------------------
-# Game aggregation 
+# Game aggregation
 # -----------------------
 def get_game_info(pitches_df):
-
     if pitches_df.empty or "game_id" not in pitches_df.columns:
         return pd.DataFrame()
 
     df = pitches_df.dropna(subset=["game_id"])
-
     game_info = df.groupby(["game_id", "PITCHER"]).agg(
         DATE=("date", "first"),
         TOTAL_RUNS=("runs_scored", "sum"),
@@ -274,9 +245,8 @@ def get_game_info(pitches_df):
         "TOTAL_INNINGS": "IP",
     })
 
+
 def get_pitcher_season_stats(df):
-    
-    # One row per game per pitcher first (same dedup logic)
     game_df = (
         df.groupby(["game_id", "PITCHER"]).agg(
             HR=("play_result", lambda x: sum(x == "HomeRun")),
@@ -290,7 +260,6 @@ def get_pitcher_season_stats(df):
         ).reset_index()
     )
 
-    # Now aggregate to season level
     season_df = game_df.groupby("PITCHER").agg(
         G=("game_id", "count"),
         IP=("IP", "sum"),
@@ -303,7 +272,6 @@ def get_pitcher_season_stats(df):
         MV=("MV", lambda x: int(round(x.max()))),
     ).reset_index()
 
-    # Rate stats
     season_df["K/9"] = ((season_df["SO"] / season_df["IP"]) * 9).round(2)
     season_df["BB/9"] = ((season_df["BB"] / season_df["IP"]) * 9).round(2)
     season_df["HR/9"] = ((season_df["HR"] / season_df["IP"]) * 9).round(2)
@@ -315,18 +283,13 @@ def get_pitcher_season_stats(df):
 # Add opponent + location
 # -----------------------
 def game_context(game_info_df, games_df, selected_team):
-
     if games_df.empty:
         return game_info_df
 
     if "game_id" in games_df.columns:
         games_df = games_df.rename(columns={"game_id": "GAME_ID"})
 
-    merged = game_info_df.merge(
-        games_df,
-        on="GAME_ID",
-        how="left"
-    )
+    merged = game_info_df.merge(games_df, on="GAME_ID", how="left")
 
     def get_opponent(row):
         if row["home_team_name"] == selected_team:
@@ -345,13 +308,12 @@ def game_context(game_info_df, games_df, selected_team):
 
     return merged
 
-def get_hitter_game_stats(df):
 
-    # Deduplicate to one row per plate appearance (last pitch of each PA)
+def get_hitter_game_stats(df):
     pa_df = (
         df.sort_values("pitch_of_pa")
         .groupby(["game_id", "BATTER", "inning", "pa_of_inning"], as_index=False)
-        .last()  # last pitch of the PA = the outcome pitch
+        .last()
     )
 
     return pa_df.groupby(["game_id", "BATTER"]).agg(
@@ -370,16 +332,14 @@ def get_hitter_game_stats(df):
         AVG_EV=("exit_speed", "mean"),
     ).reset_index()
 
-def get_hitter_season_stats(df):
 
-    # Deduplicate to one row per plate appearance
+def get_hitter_season_stats(df):
     pa_df = (
         df.sort_values("pitch_of_pa")
         .groupby(["game_id", "BATTER", "inning", "pa_of_inning"], as_index=False)
         .last()
     )
 
-    # Game level first
     game_df = pa_df.groupby(["game_id", "BATTER"]).agg(
         H=("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun"]))),
         AB=("play_result", lambda x: sum(x.isin(["Single", "Double", "Triple", "HomeRun", "Out", "Error", "FieldersChoice"]))),
@@ -393,7 +353,6 @@ def get_hitter_season_stats(df):
         MAX_EV=("exit_speed", "max"),
     ).reset_index()
 
-    # Season level
     season_df = game_df.groupby("BATTER").agg(
         G=("game_id", "count"),
         AB=("AB", "sum"),
@@ -408,29 +367,83 @@ def get_hitter_season_stats(df):
         MAX_EV=("MAX_EV", "max"),
     ).reset_index()
 
-    # Rate stats
     season_df["AVG"] = (season_df["H"] / season_df["AB"]).round(3)
     season_df["OBP"] = ((season_df["H"] + season_df["BB"] + season_df["HBP"]) / (season_df["AB"] + season_df["BB"] + season_df["HBP"])).round(3)
-    season_df["SLG"] = ((season_df["singles"] + 2*season_df["doubles"] + 3*season_df["triples"] + 4*season_df["HR"]) / season_df["AB"]).round(3)
+    season_df["SLG"] = ((season_df["singles"] + 2 * season_df["doubles"] + 3 * season_df["triples"] + 4 * season_df["HR"]) / season_df["AB"]).round(3)
     season_df["OPS"] = (season_df["OBP"] + season_df["SLG"]).round(3)
     season_df["MAX_EV"] = season_df["MAX_EV"].round(1)
-
     season_df = season_df.drop(columns=["singles", "doubles", "triples"])
 
     return season_df
+
 
 def compute_hitter_rate_stats(df):
     df = df.copy()
     df["AVG"] = (df["H"] / df["AB"]).round(3)
     df["OBP"] = ((df["H"] + df["BB"] + df["HBP"]) / (df["AB"] + df["BB"] + df["HBP"])).round(3)
-    df["SLG"] = ((df["singles"] + 2*df["doubles"] + 3*df["triples"] + 4*df["HR"]) / df["AB"]).round(3)
+    df["SLG"] = ((df["singles"] + 2 * df["doubles"] + 3 * df["triples"] + 4 * df["HR"]) / df["AB"]).round(3)
     df["OPS"] = (df["OBP"] + df["SLG"]).round(3)
     df["MAX_EV"] = df["MAX_EV"].round(1)
     df["AVG_EV"] = df["AVG_EV"].round(1)
-
-    # Drop the helper columns
     df = df.drop(columns=["singles", "doubles", "triples"])
+    return df
 
+
+def hot_cold_label(val, pct, reverse=False):
+    if pd.isna(pct):
+        return str(val)
+    if reverse:
+        if pct >= 75:
+            return f"🧊 {val}"
+        elif pct <= 25:
+            return f"🔥 {val}"
+    else:
+        if pct >= 75:
+            return f"🔥 {val}"
+        elif pct <= 25:
+            return f"🧊 {val}"
+    return str(val)
+
+
+# -----------------------
+# Compute rolling stat percentiles (last N games)
+# -----------------------
+def compute_rolling_percentiles(df, group_col, stat, pct_name, reverse=False, window=5):
+    df = df.copy().sort_values("DATE")
+    last_n = (
+        df.groupby(group_col, group_keys=False)
+        .tail(window)
+        .copy()
+    )
+    last_n[pct_name] = last_n[stat].rank(
+        pct=True,
+        ascending=not reverse
+    ) * 100
+
+    df = df.merge(
+        last_n[[group_col, "GAME_ID", pct_name]],
+        on=[group_col, "GAME_ID"],
+        how="left"
+    )
+    return df
+
+
+# -----------------------
+# Apply hot/cold labels to a df given a stat config
+# -----------------------
+def apply_hot_cold_labels(df, stat_config):
+    """
+    stat_config: dict of { stat_col: (percentile_col, reverse) }
+    Applies hot_cold_label in-place and drops percentile columns.
+    """
+    df = df.copy()
+    for stat, (pct_col, reverse) in stat_config.items():
+        if stat in df.columns and pct_col in df.columns:
+            df[stat] = df.apply(
+                lambda row, s=stat, p=pct_col, r=reverse: hot_cold_label(row[s], row[p], r),
+                axis=1
+            )
+    df = df.drop(columns=[v[0] for v in stat_config.values()], errors="ignore")
     return df
 
 
@@ -450,7 +463,6 @@ selected_team = st.selectbox("Select a Team", all_teams)
 filtered_pitchers = pitchers_df[pitchers_df["TEAM"] == selected_team]
 filtered_hitters = hitters_df[hitters_df["TEAM"] == selected_team]
 
-
 tab1, tab2 = st.tabs(["Pitchers", "Hitters"])
 
 
@@ -458,11 +470,9 @@ tab1, tab2 = st.tabs(["Pitchers", "Hitters"])
 # Pitchers tab
 # -----------------------
 with tab1:
-
     st.subheader("Pitchers")
 
     pitcher_options = ["All Pitchers"] + filtered_pitchers["PLAYER"].tolist()
-
     selected_pitcher = st.selectbox("Select Pitcher", pitcher_options)
 
     pitcher_lookup = filtered_pitchers[["player_id", "PLAYER"]].rename(
@@ -475,16 +485,12 @@ with tab1:
 
     pitcher_percentiles_df = compute_pitcher_velo_percentiles(team_pitches)
 
-    # -----------------------
-    # Filter pitches
-    # -----------------------
     if selected_pitcher == "All Pitchers":
         pitches_throws = team_pitches
     else:
         pitcher_id = filtered_pitchers[
             filtered_pitchers["PLAYER"] == selected_pitcher
         ]["player_id"].iloc[0]
-
         pitches_throws = team_pitches[team_pitches["pitcher_id"] == pitcher_id]
 
     if not pitches_throws.empty:
@@ -495,12 +501,8 @@ with tab1:
 
         game_info_df = get_game_info(pitches_throws)
         speed_df = game_pitch_speeds(pitches_throws)
-
         game_info_df = game_info_df.merge(speed_df, on="GAME_ID", how="left")
 
-        # -----------------------
-        # Pitch metrics
-        # -----------------------
         def compute_pitch_metrics(df):
             return df.groupby("game_id").agg(
                 STRIKE_COUNT=("pitch_call", lambda x: sum(x.isin(["StrikeCalled", "StrikeSwinging"]))),
@@ -524,134 +526,6 @@ with tab1:
             max_velo["MV"] = max_velo["MV"].round().astype(int)
             return max_velo
 
-        # -----------------------
-        # Rolling 5-game velo percentiles per pitcher
-        # -----------------------
-        def compute_rolling_velo_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_pitcher = (
-                df.groupby("PITCHER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank MV across ALL pitchers' last 5 games combined
-            last5_per_pitcher["MV_PERCENTILE"] = (
-                last5_per_pitcher["MV"].rank(pct=True) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df = df.merge(
-                last5_per_pitcher[["GAME_ID", "PITCHER", "MV_PERCENTILE"]],
-                on=["GAME_ID", "PITCHER"],
-                how="left"
-            )
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game BB percentiles per pitcher
-        # -----------------------
-        def compute_rolling_BB_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_pitcher = (
-                df.groupby("PITCHER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank BB across ALL pitchers' last 5 games combined
-            last5_per_pitcher["BB_PERCENTILE"] = (
-                last5_per_pitcher["BB"].rank(pct=True, ascending=False) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df["BB_PERCENTILE"] = last5_per_pitcher["BB_PERCENTILE"]
-            df["BB_PERCENTILE"] = df["BB_PERCENTILE"].fillna(pd.NA)
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game HR percentiles per pitcher
-        # -----------------------
-        def compute_rolling_HR_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_pitcher = (
-                df.groupby("PITCHER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank HR across ALL pitchers' last 5 games combined
-            last5_per_pitcher["HR_PERCENTILE"] = (
-                last5_per_pitcher["HR"].rank(pct=True, ascending=False) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df["HR_PERCENTILE"] = last5_per_pitcher["HR_PERCENTILE"]
-            df["HR_PERCENTILE"] = df["HR_PERCENTILE"].fillna(pd.NA)
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game R percentiles per pitcher
-        # -----------------------
-        def compute_rolling_R_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_pitcher = (
-                df.groupby("PITCHER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank R across ALL pitchers' last 5 games combined
-            last5_per_pitcher["R_PERCENTILE"] = (
-                last5_per_pitcher["R"].rank(pct=True, ascending=False) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df["R_PERCENTILE"] = last5_per_pitcher["R_PERCENTILE"]
-            df["R_PERCENTILE"] = df["R_PERCENTILE"].fillna(pd.NA)
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game H percentiles per pitcher
-        # -----------------------
-        def compute_rolling_H_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_pitcher = (
-                df.groupby("PITCHER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank H across ALL pitchers' last 5 games combined
-            last5_per_pitcher["H_PERCENTILE"] = (
-                last5_per_pitcher["H"].rank(pct=True, ascending=False) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df["H_PERCENTILE"] = last5_per_pitcher["H_PERCENTILE"]
-            df["H_PERCENTILE"] = df["H_PERCENTILE"].fillna(pd.NA)
-
-            return df
-        
-        
-
-        # -----------------------
-        # Merge all metrics
-        # -----------------------
         pitch_metrics_df = compute_pitch_metrics(pitches_throws)
         pitch_results_df = get_pitch_results(pitches_throws)
         game_max_velo_df = get_max_velo(pitches_throws)
@@ -664,107 +538,51 @@ with tab1:
         )
 
         enriched_games = game_context(game_info_df, games_df, selected_team)
-        filtered_games = enriched_games[enriched_games["NP"] > 0]
+        filtered_games = enriched_games[enriched_games["NP"] > 0].copy()
 
-        # -----------------------
-        # Game log table
-        # -----------------------
         st.subheader(f"{selected_pitcher} Game Info")
 
+    # -----------------------
+    # All Pitchers: season stats with hot/cold
+    # -----------------------
     if selected_pitcher == "All Pitchers":
         season_stats = get_pitcher_season_stats(pitches_throws)
 
         pitch_hand_lookup = filtered_pitchers[["PLAYER", "PITCH HAND"]].rename(columns={"PLAYER": "PITCHER"})
-        season_stats = season_stats.merge(pitch_hand_lookup, on="PITCHER", how="left")
+        season_stats = season_stats.merge(pitch_hand_lookup, on="PITCHER", how="left").copy()
 
         season_stats["MV"] = season_stats["MV"].apply(lambda x: int(round(x)) if pd.notna(x) else x)
         season_stats["BB"] = season_stats["BB"].apply(lambda x: int(round(x)) if pd.notna(x) else x)
-
-        # Rank stats across all pitchers
         season_stats["MV_PERCENTILE"] = season_stats["MV"].rank(pct=True) * 100
         season_stats["BB_PERCENTILE"] = season_stats["BB"].rank(pct=True, ascending=False) * 100
         season_stats["HR_PERCENTILE"] = season_stats["HR"].rank(pct=True, ascending=False) * 100
         season_stats["R_PERCENTILE"] = season_stats["R"].rank(pct=True, ascending=False) * 100
         season_stats["H_PERCENTILE"] = season_stats["H"].rank(pct=True, ascending=False) * 100
+        season_stats["SO_PERCENTILE"] = season_stats["SO"].rank(pct=True) * 100
 
-        def mv_season_label(row):
-            mv = row["MV"]
-            pct = row["MV_PERCENTILE"]
-            if pd.isna(pct):
-                return str(mv)
-            elif pct >= 75:
-                return f"🔥 {mv}"
-            elif pct <= 25:
-                return f"🧊 {mv}"
-            else:
-                return str(mv)
-            
-        def bb_season_label(row):
-            bb = row["BB"]
-            pct = row["BB_PERCENTILE"]
-            if pd.isna(pct):
-                return str(bb)
-            elif pct >= 75:
-                return f"🔥 {bb}"
-            elif pct <= 25:
-                return f"🧊 {bb}"
-            else:
-                return str(bb)
-            
-        def hr_season_label(row):
-            hr = row["HR"]
-            pct = row["HR_PERCENTILE"]
-            if pd.isna(pct):
-                return str(hr)
-            elif pct >= 75:
-                return f"🔥 {hr}"
-            elif pct <= 25:
-                return f"🧊 {hr}"
-            else:
-                return str(hr)
-            
-        def r_season_label(row):
-            r = row["R"]
-            pct = row["R_PERCENTILE"]
-            if pd.isna(pct):
-                return str(r)
-            elif pct >= 75:
-                return f"🔥 {r}"
-            elif pct <= 25:
-                return f"🧊 {r}"
-            else:
-                return str(r)
-            
-        def h_season_label(row):
-            h = row["H"]
-            pct = row["H_PERCENTILE"]
-            if pd.isna(pct):
-                return str(h)
-            elif pct >= 75:
-                return f"🔥 {h}"
-            elif pct <= 25:
-                return f"🧊 {h}"
-            else:
-                return str(h)
-
-
-        season_stats["MV"] = season_stats.apply(mv_season_label, axis=1)
-        season_stats["BB"] = season_stats.apply(bb_season_label, axis=1)
-        season_stats["HR"] = season_stats.apply(hr_season_label, axis=1)
-        season_stats["R"] = season_stats.apply(r_season_label, axis=1)
-        season_stats["H"] = season_stats.apply(h_season_label, axis=1)
-        season_stats = season_stats.drop(columns=["MV_PERCENTILE"])
-        season_stats = season_stats.drop(columns=["BB_PERCENTILE"])
-        season_stats = season_stats.drop(columns=["HR_PERCENTILE"])
-        season_stats = season_stats.drop(columns=["R_PERCENTILE"])
-        season_stats = season_stats.drop(columns=["H_PERCENTILE"])
-
+        pitcher_stat_config = {
+            "MV": ("MV_PERCENTILE", False),
+            "BB": ("BB_PERCENTILE", True),
+            "HR": ("HR_PERCENTILE", True),
+            "R":  ("R_PERCENTILE",  True),
+            "H":  ("H_PERCENTILE",  True),
+            "SO": ("SO_PERCENTILE", False),
+        }
 
 
         allowed_cols = ["PITCHER", "PITCH HAND", "G", "IP", "NP", "H", "R", "HR", "BB", "SO", "MV"]
         default_cols = ["PITCHER", "PITCH HAND", "G", "IP", "H", "R", "HR", "BB", "SO", "MV"]
-
         selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
+        
+        hot_cold_stats = st.multiselect(
+            "🔥🧊 Show Hot/Cold labels for:",
+            options=list(pitcher_stat_config.keys()),
+            default=list(pitcher_stat_config.keys()),  # all on by default
+            key="pitcher_season_hot_cold_stats"
+        )
+
+        filtered_config = {k: v for k, v in pitcher_stat_config.items() if k in hot_cold_stats}
+        season_stats = apply_hot_cold_labels(season_stats, filtered_config)
 
         st.dataframe(
             season_stats[selected_columns].reset_index(drop=True),
@@ -772,294 +590,131 @@ with tab1:
             hide_index=True
         )
 
+    # -----------------------
+    # Individual pitcher: game log with rolling hot/cold
+    # -----------------------
     else:
-        # individual pitcher game log
+        pitcher_game_stat_list = [
+            ("MV",  False),
+            ("H",   True),
+            ("HR",  True),
+            ("BB",  True),
+            ("SO",  False),
+            ("R",   True),
+        ]
+
+        display_df = filtered_games.copy().reset_index(drop=True)
+
+        for stat, reverse in pitcher_game_stat_list:
+            display_df = compute_rolling_percentiles(
+                display_df,
+                group_col="PITCHER",
+                stat=stat,
+                pct_name=f"{stat}_PERCENTILE",
+                reverse=reverse,
+                window=5
+        )
+
+        pitcher_game_stat_config = {stat: (f"{stat}_PERCENTILE", reverse) for stat, reverse in pitcher_game_stat_list}
+        display_df = apply_hot_cold_labels(display_df, pitcher_game_stat_config)
+
         allowed_cols = ["DATE", "OPPONENT", "LOCATION", "NP", "MV", "MAX_SPEED", "IP", "H", "R", "HR", "BB", "SO"]
         default_cols = ["DATE", "OPPONENT", "LOCATION", "NP", "MV", "IP", "H", "R", "HR", "BB", "SO"]
-
         selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
 
-        display_df = compute_rolling_velo_percentiles(filtered_games).reset_index(drop=True)
+        hot_cold_stats = st.multiselect(
+            "🔥🧊 Show Hot/Cold labels for:",
+            options=list(pitcher_game_stat_config.keys()),
+            default=list(pitcher_game_stat_config.keys()),  # all on by default
+            key="pitcher_game_hot_cold_stats"
+        )
 
-        display_df["MV_DISPLAY"] = display_df.apply(mv_label, axis=1)
-        display_cols = [c if c != "MV" else "MV_DISPLAY" for c in selected_columns]
-        clean_df = display_df[display_cols].rename(columns={"MV_DISPLAY": "MV"})
+        filtered_config = {k: v for k, v in pitcher_game_stat_config.items() if k in hot_cold_stats}
+        season_stats = apply_hot_cold_labels(display_df, filtered_config)
 
         st.subheader(f"{selected_pitcher} Game By Game Stats")
         st.dataframe(
-            clean_df,
+            display_df[selected_columns].reset_index(drop=True),
             use_container_width=True,
-            hide_index=True,
-            column_config={
-                "MV": st.column_config.TextColumn("MV", help="🔥 top 25% | 🧊 bottom 25% of last 5 games")
-            }
+            hide_index=True
         )
+
 
 # -----------------------
 # Hitters tab
-# ------------------
+# -----------------------
 with tab2:
+
     st.subheader("Hitters")
 
     hitter_lookup = (
-    filtered_hitters[["player_id", "PLAYER"]]
-    .drop_duplicates(subset="player_id") 
-    .rename(columns={"player_id": "batter_id", "PLAYER": "BATTER"})
+        filtered_hitters[["player_id", "PLAYER"]]
+        .drop_duplicates(subset="player_id")
+        .rename(columns={"player_id": "batter_id", "PLAYER": "BATTER"})
     )
 
     team_hitter_ids = filtered_hitters["player_id"].tolist()
     team_atbats = get_team_atbats(tuple(team_hitter_ids))
     team_atbats = team_atbats.merge(hitter_lookup, on="batter_id", how="left")
 
+    hitter_options = ["All Hitters"] + filtered_hitters["PLAYER"].unique().tolist()
+    selected_hitter = st.selectbox("Select Hitter", hitter_options)
+
     if not team_atbats.empty:
-        season_stats = get_hitter_season_stats(team_atbats)
-        bat_hand_lookup = (
-            filtered_hitters[["PLAYER", "BAT HAND"]]
-            .drop_duplicates(subset="PLAYER")
-            .rename(columns={"PLAYER": "BATTER"})
-        )
-        season_stats = season_stats.merge(bat_hand_lookup, on="BATTER", how="left")
-        season_stats = season_stats.drop_duplicates(subset="BATTER")
 
         # -----------------------
-        # Rolling 5-game AVG percentiles per hiter
+        # Individual hitter: game log with rolling hot/cold
         # -----------------------
-        def compute_rolling_AVG_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_hitter = (
-                df.groupby("HITTER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank MV across ALL pitchers' last 5 games combined
-            last5_per_hitter["AVG_PERCENTILE"] = (
-                last5_per_hitter["AVG"].rank(pct=True) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df = df.merge(
-                last5_per_hitter[["GAME_ID", "HITTER", "AVG_PERCENTILE"]],
-                on=["GAME_ID", "HITTER"],
-                how="left"
-            )
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game AVG percentiles per hitter
-        # -----------------------
-        def compute_rolling_OBP_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_hitter = (
-                df.groupby("HITTER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank MV across ALL pitchers' last 5 games combined
-            last5_per_hitter["OBP_PERCENTILE"] = (
-                last5_per_hitter["OBP"].rank(pct=True) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df = df.merge(
-                last5_per_hitter[["GAME_ID", "HITTER", "OBP_PERCENTILE"]],
-                on=["GAME_ID", "HITTER"],
-                how="left"
-            )
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game SLG percentiles per hitter
-        # -----------------------
-        def compute_rolling_SLG_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_hitter = (
-                df.groupby("HITTER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank MV across ALL pitchers' last 5 games combined
-            last5_per_hitter["SLG_PERCENTILE"] = (
-                last5_per_hitter["SLG"].rank(pct=True) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df = df.merge(
-                last5_per_hitter[["GAME_ID", "HITTER", "SLG_PERCENTILE"]],
-                on=["GAME_ID", "HITTER"],
-                how="left"
-            )
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game OPS percentiles per hitter
-        # -----------------------
-        def compute_rolling_OPS_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_hitter = (
-                df.groupby("HITTER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank MV across ALL pitchers' last 5 games combined
-            last5_per_hitter["OPS_PERCENTILE"] = (
-                last5_per_hitter["OPS"].rank(pct=True) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df = df.merge(
-                last5_per_hitter[["GAME_ID", "HITTER", "OPS_PERCENTILE"]],
-                on=["GAME_ID", "HITTER"],
-                how="left"
-            )
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game BB percentiles per hitter
-        # -----------------------
-        def compute_rolling_BB_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_hitter = (
-                df.groupby("HITTER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank MV across ALL pitchers' last 5 games combined
-            last5_per_hitter["BB_PERCENTILE"] = (
-                last5_per_hitter["BB"].rank(pct=True) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df = df.merge(
-                last5_per_hitter[["GAME_ID", "HITTER", "BB_PERCENTILE"]],
-                on=["GAME_ID", "HITTER"],
-                how="left"
-            )
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game HR percentiles per hitter
-        # -----------------------
-        def compute_rolling_HR_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_hitter = (
-                df.groupby("HITTER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank MV across ALL pitchers' last 5 games combined
-            last5_per_hitter["HR_PERCENTILE"] = (
-                last5_per_hitter["AVG"].rank(pct=True) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df = df.merge(
-                last5_per_hitter[["GAME_ID", "HITTER", "HR_PERCENTILE"]],
-                on=["GAME_ID", "HITTER"],
-                how="left"
-            )
-
-            return df
-        
-        # -----------------------
-        # Rolling 5-game H percentiles per hitter
-        # -----------------------
-        def compute_rolling_H_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_hitter = (
-                df.groupby("HITTER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank MV across ALL pitchers' last 5 games combined
-            last5_per_hitter["H_PERCENTILE"] = (
-                last5_per_hitter["H"].rank(pct=True) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df = df.merge(
-                last5_per_hitter[["GAME_ID", "HITTER", "H_PERCENTILE"]],
-                on=["GAME_ID", "HITTER"],
-                how="left"
-            )
-
-            return df
-        
-                # -----------------------
-        # Rolling 5-game SO percentiles per hitter
-        # -----------------------
-        def compute_rolling_SO_percentiles(df):
-            df = df.copy().sort_values("DATE")
-
-            # Get each pitcher's last 5 games only
-            last5_per_hitter = (
-                df.groupby("HITTER", group_keys=False)
-                .tail(5)
-                .copy()
-            )
-
-            # Rank HR across ALL pitchers' last 5 games combined
-            last5_per_hitter["SO_PERCENTILE"] = (
-                last5_per_hitter["SO"].rank(pct=True, ascending=False) * 100
-            )
-
-            # Merge percentiles back onto the full df
-            df["SO_PERCENTILE"] = last5_per_hitter["SO_PERCENTILE"]
-            df["SO_PERCENTILE"] = df["SO_PERCENTILE"].fillna(pd.NA)
-
-            return df
-
-
-        hitter_options = ["All Hitters"] + filtered_hitters["PLAYER"].unique().tolist()
-        selected_hitter = st.selectbox("Select Hitter", hitter_options)
-
-
         if selected_hitter != "All Hitters":
             hitter_id = filtered_hitters[filtered_hitters["PLAYER"] == selected_hitter]["player_id"].iloc[0]
-
             hitter_atbats = team_atbats[team_atbats["batter_id"] == hitter_id]
 
             if not hitter_atbats.empty:
                 game_log = get_hitter_game_stats(hitter_atbats)
                 game_log = compute_hitter_rate_stats(game_log)
+                game_log = game_log.rename(columns={"game_id": "GAME_ID"})
 
                 games_df = get_all_games()
-
-                # Opponent and location Context
                 game_ids = hitter_atbats["game_id"].dropna().unique().tolist()
                 games_df = games_df[games_df["game_id"].isin(game_ids)]
+                game_log = game_context(game_log, games_df, selected_team)
 
-                game_log = game_log.rename(columns={"game_id" : "GAME_ID"})
-                game_log= game_context(game_log, games_df, selected_team)
+                hitter_game_stat_list = [
+                    ("AVG", False),
+                    ("OBP", False),
+                    ("SLG", False),
+                    ("OPS", False),
+                    ("H",   False),
+                    ("HR",  False),
+                    ("BB",  False),
+                    ("SO",  True),
+                ]
+
+                for stat, reverse in hitter_game_stat_list:
+                    game_log = compute_rolling_percentiles(
+                        game_log,
+                        group_col="BATTER",
+                        stat=stat,
+                        pct_name=f"{stat}_PERCENTILE",
+                        reverse=reverse,
+                                window=5
+                )
+
+                hitter_game_stat_config = {stat: (f"{stat}_PERCENTILE", reverse) for stat, reverse in hitter_game_stat_list}
 
                 allowed_cols = ["DATE", "OPPONENT", "LOCATION", "AB", "H", "HR", "BB", "SO", "HBP", "AVG", "OBP", "SLG", "OPS"]
                 default_cols = ["DATE", "OPPONENT", "LOCATION", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
                 selected_hitter_cols = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols, key="hitter_game_log_cols")
+
+                hot_cold_stats = st.multiselect(
+                    "🔥🧊 Show Hot/Cold labels for:",
+                    options=list(hitter_game_stat_config.keys()),
+                    default=list(hitter_game_stat_config.keys()),  # all on by default
+                    key="hitter_game_hot_cold_stats"
+                )
+
+                filtered_config = {k: v for k, v in pitcher_stat_config.items() if k in hot_cold_stats}
+                game_log = apply_hot_cold_labels(hitter_game_stat_config, filtered_config)
 
                 st.subheader(f"{selected_hitter} Game By Game Stats")
                 st.dataframe(
@@ -1069,142 +724,61 @@ with tab2:
                 )
             else:
                 st.write("No game data available for this hitter")
-                
+
+        # -----------------------
+        # All Hitters: season stats with hot/cold
+        # -----------------------
         else:
+            season_stats = get_hitter_season_stats(team_atbats)
+
+            bat_hand_lookup = (
+                filtered_hitters[["PLAYER", "BAT HAND"]]
+                .drop_duplicates(subset="PLAYER")
+                .rename(columns={"PLAYER": "BATTER"})
+            )
+            season_stats = season_stats.merge(bat_hand_lookup, on="BATTER", how="left")
+            season_stats = season_stats.drop_duplicates(subset="BATTER")
+
             season_stats["AVG_PERCENTILE"] = season_stats["AVG"].rank(pct=True) * 100
             season_stats["OBP_PERCENTILE"] = season_stats["OBP"].rank(pct=True) * 100
             season_stats["SLG_PERCENTILE"] = season_stats["SLG"].rank(pct=True) * 100
             season_stats["OPS_PERCENTILE"] = season_stats["OPS"].rank(pct=True) * 100
-            season_stats["H_PERCENTILE"] = season_stats["H"].rank(pct=True) * 100
-            season_stats["HR_PERCENTILE"] = season_stats["H"].rank(pct=True) * 100
-            season_stats["BB_PERCENTILE"] = season_stats["BB"].rank(pct=True, ascending=False) * 100
-            season_stats["SO_PERCENTILE"] = season_stats["SO"].rank(pct=True, ascending=False) * 100
+            season_stats["H_PERCENTILE"]   = season_stats["H"].rank(pct=True) * 100
+            season_stats["HR_PERCENTILE"]  = season_stats["HR"].rank(pct=True) * 100
+            season_stats["BB_PERCENTILE"]  = season_stats["BB"].rank(pct=True) * 100
+            season_stats["SO_PERCENTILE"]  = season_stats["SO"].rank(pct=True, ascending=False) * 100
 
-            def avg_season_label(row):
-                avg = row["AVG"]
-                pct = row["AVG_PERCENTILE"]
-                if pd.isna(pct):
-                    return str(avg)
-                elif pct >= 75:
-                    return f"🔥 {avg}"
-                elif pct <= 25:
-                    return f"🧊 {avg}"
-                else:
-                    return str(avg)
-                
-            def obp_season_label(row):
-                obp = row["OBP"]
-                pct = row["OBP_PERCENTILE"]
-                if pd.isna(pct):
-                    return str(obp)
-                elif pct >= 75:
-                    return f"🔥 {obp}"
-                elif pct <= 25:
-                    return f"🧊 {obp}"
-                else:
-                    return str(obp)
-                
-            def slg_season_label(row):
-                slg = row["SLG"]
-                pct = row["SLG_PERCENTILE"]
-                if pd.isna(pct):
-                    return str(slg)
-                elif pct >= 75:
-                    return f"🔥 {slg}"
-                elif pct <= 25:
-                    return f"🧊 {slg}"
-                else:
-                    return str(slg)
-                
-            def ops_season_label(row):
-                ops = row["OPS"]
-                pct = row["OPS_PERCENTILE"]
-                if pd.isna(pct):
-                    return str(ops)
-                elif pct >= 75:
-                    return f"🔥 {ops}"
-                elif pct <= 25:
-                    return f"🧊 {ops}"
-                else:
-                    return str(ops)
-                
-            def h_season_label(row):
-                h = row["H"]
-                pct = row["H_PERCENTILE"]
-                if pd.isna(pct):
-                    return str(h)
-                elif pct >= 75:
-                    return f"🔥 {h}"
-                elif pct <= 25:
-                    return f"🧊 {h}"
-                else:
-                    return str(h)
-                
-            def hr_season_label(row):
-                hr = row["HR"]
-                pct = row["HR_PERCENTILE"]
-                if pd.isna(pct):
-                    return str(hr)
-                elif pct >= 75:
-                    return f"🔥 {hr}"
-                elif pct <= 25:
-                    return f"🧊 {hr}"
-                else:
-                    return str(hr)
-                
-            def bb_season_label(row):
-                bb = row["BB"]
-                pct = row["BB_PERCENTILE"]
-                if pd.isna(pct):
-                    return str(bb)
-                elif pct >= 75:
-                    return f"🔥 {bb}"
-                elif pct <= 25:
-                    return f"🧊 {bb}"
-                else:
-                    return str(bb)
-            
-            def so_season_label(row):
-                so = row["SO"]
-                pct = row["SO_PERCENTILE"]
-                if pd.isna(pct):
-                    return str(so)
-                elif pct >= 75:
-                    return f"🔥 {so}"
-                elif pct <= 25:
-                    return f"🧊 {so}"
-                else:
-                    return str(so)
-                
-            season_stats["AVG"] = season_stats.apply(avg_season_label, axis=1)
-            season_stats["OBP"] = season_stats.apply(obp_season_label, axis=1)
-            season_stats["SLG"] = season_stats.apply(slg_season_label, axis=1)
-            season_stats["OPS"] = season_stats.apply(ops_season_label, axis=1)
-            season_stats["HR"] = season_stats.apply(hr_season_label, axis=1)
-            season_stats["BB"] = season_stats.apply(bb_season_label, axis=1)
-            season_stats["SO"] = season_stats.apply(so_season_label, axis=1)
-            season_stats["H"] = season_stats.apply(h_season_label, axis=1)
-            season_stats = season_stats.drop(columns=["AVG_PERCENTILE"])
-            season_stats = season_stats.drop(columns=["OBP_PERCENTILE"])
-            season_stats = season_stats.drop(columns=["SLG_PERCENTILE"])
-            season_stats = season_stats.drop(columns=["OPS_PERCENTILE"])
-            season_stats = season_stats.drop(columns=["BB_PERCENTILE"])
-            season_stats = season_stats.drop(columns=["HR_PERCENTILE"])
-            season_stats = season_stats.drop(columns=["SO_PERCENTILE"])
-            season_stats = season_stats.drop(columns=["H_PERCENTILE"])
-                
+            hitter_season_stat_config = {
+                "AVG": ("AVG_PERCENTILE", False),
+                "OBP": ("OBP_PERCENTILE", False),
+                "SLG": ("SLG_PERCENTILE", False),
+                "OPS": ("OPS_PERCENTILE", False),
+                "H":   ("H_PERCENTILE",   False),
+                "HR":  ("HR_PERCENTILE",  False),
+                "BB":  ("BB_PERCENTILE",  False),
+                "SO":  ("SO_PERCENTILE",  True),
+            }
 
             allowed_cols = ["BATTER", "BAT HAND", "G", "AB", "H", "HR", "BB", "SO", "HBP", "AVG", "OBP", "SLG", "OPS", "MAX_EV"]
             default_cols = ["BATTER", "BAT HAND", "G", "AB", "H", "HR", "BB", "SO", "AVG", "OBP", "SLG", "OPS"]
-
             selected_columns = st.multiselect("Select stats to display", options=allowed_cols, default=default_cols)
+
+            hot_cold_stats = st.multiselect(
+                "🔥🧊 Show Hot/Cold labels for:",
+                options=list(hitter_season_stat_config.keys()),
+                default=list(hitter_season_stat_config.keys()),  # all on by default
+                key="hitter_season_hot_cold_stats"
+            )
+
+            filtered_config = {k: v for k, v in hitter_season_stat_config.items() if k in hot_cold_stats}
+            season_stats = apply_hot_cold_labels(season_stats, filtered_config)
 
             st.subheader("Hitter's Season Stats")
             st.dataframe(
                 season_stats[selected_columns].reset_index(drop=True),
                 use_container_width=True,
                 hide_index=True
-        )
+            )
 
     else:
         st.write("No at-bat data available.")

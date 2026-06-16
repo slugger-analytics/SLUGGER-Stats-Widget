@@ -19,7 +19,7 @@ A Streamlit app that pulls baseball statistics from the Pointstreak API and disp
     Create a .env file in the project root:
     API_KEY=your_api_key_here
 4. Running the App
-    streamlit run app.py
+    streamlit run widget.py
 
 After running the command, Streamlit should open automatically in your browser. If not, open the local URL shown in the terminal (usually something like http://localhost:8501).
 
@@ -44,7 +44,7 @@ Hot/cold labels are based on rolling percentiles from a player’s last 7 games:
 # Project Structure: 
 project/
 │
-├── app.py
+├── widget.py
 ├── .env
 ├── requirements.txt
 └── README.md

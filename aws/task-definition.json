@@ -1,0 +1,52 @@
+{
+  "containerDefinitions": [
+    {
+      "name": "slugger-stats",
+      "image": "746669223415.dkr.ecr.us-east-2.amazonaws.com/widget-stats:latest",
+      "cpu": 0,
+      "portMappings": [
+        {
+          "containerPort": 8501,
+          "hostPort": 8501,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        {
+          "name": "SEASON_GUID",
+          "value": "9843025b-3dd7-4b1b-8776-a6b53a3bdb7a"
+        },
+        {
+          "name": "LEAGUE_GUID",
+          "value": "df9fb9cc-0fdb-4b79-8a3c-ad5d7b415a56"
+        }
+      ],
+      "mountPoints": [],
+      "volumesFrom": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/slugger-stats",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "systemControls": []
+    }
+  ],
+  "family": "slugger-stats",
+  "executionRoleArn": "arn:aws:iam::746669223415:role/slugger-ecs-execution",
+  "networkMode": "awsvpc",
+  "volumes": [],
+  "placementConstraints": [],
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "512",
+  "memory": "1024"
+}

@@ -12,6 +12,7 @@ import os
 from io import BytesIO
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
+from stats_utils import select_season_rows
 
 
 # -------------------
@@ -215,7 +216,10 @@ def get_team_stats_aggregated(team_guid, players_df):
 
         raw_stats = stats_df.iloc[0]["stats"]
 
-        for season_guid, season_data in raw_stats.items():
+        # Constrain to the configured current season so junk ("DO-NOT-USE")
+        # and prior seasons don't create duplicate per-player rows. When
+        # SEASON_GUID is unset (e.g. local dev) this falls back to all seasons.
+        for season_guid, season_data in select_season_rows(raw_stats, SEASON_GUID):
             # ── Batting ──────────────────────────────────────
             b = season_data.get("batting", {}).get("overall", {})
             if b.get("PA", 0) > 0:
@@ -278,7 +282,6 @@ def hot_cold_label(val, pct, reverse=False):
 
 
 st.title("ALPB Player Stats")
-st.text("NOTE: The widget is in the process of being migrated to a new API")
 
 teams_df = get_league_teams()
 if teams_df.empty:

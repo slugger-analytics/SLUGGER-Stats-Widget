@@ -134,7 +134,12 @@ def fetch(endpoint, params=None):
         st.error(f"Error fetching {url}: {e}")
         return {}
 
-@st.cache_data
+# Cache TTLs (seconds). The Fargate task lives for days, so an untimed cache
+# freezes teams, rosters and stats until the container restarts — a player who
+# signed today would never appear. get_player_stats is held strictly SHORTER
+# than get_team_stats_aggregated so an aggregate rebuild re-pulls live data
+# instead of re-serving its own cached per-player payloads.
+@st.cache_data(ttl=3600)
 def get_league_teams():
     data = fetch(f"public/leagues/{LEAGUE_GUID}/teams")
     if not data:
@@ -144,7 +149,7 @@ def get_league_teams():
     df = df.rename(columns={"guid": "team_guid", "name": "TEAM"})
     return df
 
-@st.cache_data
+@st.cache_data(ttl=900)
 def get_team_players(team_guid):
     data = fetch(f"public/teams/{team_guid}/players")
     if not data:
@@ -154,7 +159,7 @@ def get_team_players(team_guid):
     df = df.rename(columns={"guid": "player_guid", "name": "PLAYER"})
     return df
 
-@st.cache_data
+@st.cache_data(ttl=900)
 def get_player_stats(player_guid):
     data = fetch("player-stats", params={"playerId": player_guid})
     if not data:
@@ -162,43 +167,7 @@ def get_player_stats(player_guid):
     rows = data if isinstance(data, list) else data.get("items", data.get("data", []))
     return pd.DataFrame(rows)
 
-def parse_player_stats(stats_df):
-    """
-    Extract the stats from the nested iScore response into flat dicts
-    for batting, pitching, and fielding.
-    """
-    if stats_df.empty:
-        return {}, {}, {}
-
-    raw_stats = stats_df.iloc[0]["stats"]  # dict keyed by season GUID(s)
-
-    # Merge across all seasons (usually just one active season)
-    batting_overall = {}
-    pitching_overall = {}
-    fielding_overall = {}
-
-    for season_guid, season_data in raw_stats.items():
-        # BATTING
-        b = season_data.get("batting", {}).get("overall", {})
-        rates = b.pop("RATES", {})
-        batting_overall.update(b)
-        batting_overall.update(rates)
-
-        # PITCHING
-        p = season_data.get("pitching", {}).get("overall", {})
-        rates = p.pop("RATES", {})
-        pitching_overall.update(p)
-        pitching_overall.update(rates)
-
-        # FIELDING
-        f = season_data.get("fielding", {}).get("overall", {})
-        rates = f.pop("RATES", {})
-        fielding_overall.update(f)
-        fielding_overall.update(rates)
-
-    return batting_overall, pitching_overall, fielding_overall
-
-@st.cache_data
+@st.cache_data(ttl=1800)
 def get_team_stats_aggregated(team_guid, players_df):
     """Fetch stats for every player on the team and build batting + pitching tables."""
     batting_rows = []
@@ -263,21 +232,6 @@ def get_team_stats_aggregated(team_guid, players_df):
     pitching_df = pd.DataFrame(pitching_rows).drop_duplicates()
     
     return batting_df, pitching_df
-
-def hot_cold_label(val, pct, reverse=False):
-    if pd.isna(pct):
-        return str(val)
-    if reverse:
-        if pct >= 75:
-            return f"🧊 {val}"
-        elif pct <= 25:
-            return f"🔥 {val}"
-    else:
-        if pct >= 75:
-            return f"🔥 {val}"
-        elif pct <= 25:
-            return f"🧊 {val}"
-    return str(val)
 
 
 

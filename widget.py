@@ -124,15 +124,33 @@ LEAGUE_GUID = os.getenv("LEAGUE_GUID")
 SEASON_GUID = os.getenv("SEASON_GUID")
 HEADERS = {"Content-Type": "application/json"}
 
+# iScore is occasionally flaky for a second or two. That is survivable; caching
+# the flake is not. Every fetch here feeds an @st.cache_data function, and a
+# swallowed failure returning {} looks exactly like a successful empty response,
+# so it used to be stored under the full TTL: one blip pinned the widget on
+# "Could not load teams." for an hour after iScore had recovered, and a blip
+# during an aggregate build silently dropped players from a team table that was
+# then served as authoritative for 30 minutes. Raising instead means the cache
+# stores nothing — st.cache_data does not memoize an exception — so the next
+# rerun re-fetches and the widget self-heals.
+class UpstreamError(RuntimeError):
+    """iScore could not be reached, or answered with an error status."""
+
+
+# Without this a single hung connection holds a Streamlit script run open
+# indefinitely, and the user just sees a spinner that never resolves.
+FETCH_TIMEOUT = (5, 20)
+
+
 def fetch(endpoint, params=None):
     url = f"{BASE_URL}/{endpoint}"
     try:
-        resp = requests.get(url, headers=HEADERS, params=params)
+        resp = requests.get(url, headers=HEADERS, params=params,
+                            timeout=FETCH_TIMEOUT)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        st.error(f"Error fetching {url}: {e}")
-        return {}
+        raise UpstreamError(f"Error fetching {url}: {e}") from e
 
 # Cache TTLs (seconds). The Fargate task lives for days, so an untimed cache
 # freezes teams, rosters and stats until the container restarts — a player who
@@ -179,6 +197,12 @@ def get_team_stats_aggregated(team_guid, players_df):
         throws = player.get("throwsHand", "")
         bats = player.get("bats", "")
 
+        # A player whose stats call fails must not just vanish from the table.
+        # Measured on Lancaster: two injected blips turned 26 batters into 25 and
+        # 27 pitchers into 26, and the short table was then cached as the team's
+        # authoritative roster for the full aggregate TTL with nothing on screen
+        # saying it was incomplete. Failing the build keeps the cache empty, so a
+        # rerun rebuilds it whole.
         stats_df = get_player_stats(player_guid)
         if stats_df.empty:
             continue
@@ -237,16 +261,35 @@ def get_team_stats_aggregated(team_guid, players_df):
 
 st.title("ALPB Player Stats")
 
-teams_df = get_league_teams()
+def stop_on_upstream_error(error):
+    """Report an outage as a live, retryable condition rather than a dead page.
+
+    Nothing was cached, so the retry genuinely re-fetches — unlike before, when
+    the failure itself was cached and the banner outlived the outage.
+    """
+    st.warning("Couldn't reach the league stats feed just now.")
+    st.caption(str(error))
+    st.button("Try again")
+    st.stop()
+
+
+try:
+    teams_df = get_league_teams()
+except UpstreamError as e:
+    stop_on_upstream_error(e)
+
 if teams_df.empty:
-    st.warning("Could not load teams.")
+    st.warning("The league returned no teams.")
     st.stop()
 
 selected_team = st.selectbox("Select a Team", sorted(teams_df["TEAM"].dropna().unique()))
 team_guid = teams_df[teams_df["TEAM"] == selected_team].iloc[0]["team_guid"]
 
-players_df = get_team_players(team_guid)
-batting_df, pitching_df = get_team_stats_aggregated(team_guid, players_df)
+try:
+    players_df = get_team_players(team_guid)
+    batting_df, pitching_df = get_team_stats_aggregated(team_guid, players_df)
+except UpstreamError as e:
+    stop_on_upstream_error(e)
 
 tab1, tab2 = st.tabs(["Pitchers", "Hitters"])
 
@@ -290,18 +333,26 @@ with tab1:
             hide_index=True
         )
 
-        st.download_button(
-            label="🖨️ Download PDF",
-            data=generate_pdf(
-                df=pitching_df,
-                title="Pitcher Season Stats",
-                subtitle=f"Team: {selected_team}",
-                selected_cols=selected_cols,
-            ),
-            file_name=pdf_filename("pitcher_season"),
-            mime="application/pdf",
-            key="pdf_pitcher_season",
-        )
+        # download_button builds its payload EAGERLY on every rerun, so with no
+        # columns selected generate_pdf would hand reportlab a 0-column table and
+        # raise. That is a script-level exception: the page is replaced by a red
+        # traceback, and because this tab is built first, clearing the pitcher
+        # columns also took the Hitters tab down with it.
+        if selected_cols:
+            st.download_button(
+                label="🖨️ Download PDF",
+                data=generate_pdf(
+                    df=pitching_df,
+                    title="Pitcher Season Stats",
+                    subtitle=f"Team: {selected_team}",
+                    selected_cols=selected_cols,
+                ),
+                file_name=pdf_filename("pitcher_season"),
+                mime="application/pdf",
+                key="pdf_pitcher_season",
+            )
+        else:
+            st.caption("Pick at least one column to export a PDF.")
 
 # ── Tab 2: Hitters ────────────────────────────────────────
 with tab2:
@@ -344,15 +395,19 @@ with tab2:
             hide_index=True
         )
 
-        st.download_button(
-            label="🖨️ Download PDF",
-            data=generate_pdf(
-                df=batting_df,
-                title="Batting Season Stats",
-                subtitle=f"Team: {selected_team}",
-                selected_cols=selected_cols,
-            ),
-            file_name=pdf_filename("batting_season"),
-            mime="application/pdf",
-            key="pdf_batting_season",
-        )
+        # See the pitcher tab: an empty column selection must not crash the page.
+        if selected_cols:
+            st.download_button(
+                label="🖨️ Download PDF",
+                data=generate_pdf(
+                    df=batting_df,
+                    title="Batting Season Stats",
+                    subtitle=f"Team: {selected_team}",
+                    selected_cols=selected_cols,
+                ),
+                file_name=pdf_filename("batting_season"),
+                mime="application/pdf",
+                key="pdf_batting_season",
+            )
+        else:
+            st.caption("Pick at least one column to export a PDF.")

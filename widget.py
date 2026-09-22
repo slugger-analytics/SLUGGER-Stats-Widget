@@ -1,9 +1,7 @@
-
 import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime
-from reportlab.lib.pagesizes import LETTER
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -237,7 +235,6 @@ def get_team_stats_aggregated(team_guid, players_df):
             if p.get("BF", 0) > 0:
                 r = p.get("RATES", {})
                 outs = p.get("OUTS_PITCHED", 0)
-                batting_rows_exist = any(row["BATTER"] == name for row in batting_rows)
                 pitching_rows.append({
                     "PITCHER":     name,
                     "PITCH HAND":  throws,

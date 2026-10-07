@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 from datetime import datetime
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import LETTER, landscape
 import os
@@ -111,7 +111,7 @@ def generate_pdf(df, title, subtitle, selected_cols):
     return buffer
 
 def pdf_filename(prefix):
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y%m%d_%H%M%S")
     return f"{prefix}_{timestamp}.pdf"
 
 
@@ -120,6 +120,9 @@ BASE_URL = "https://api.microservices.iscoresports.com/api"
 load_dotenv()
 LEAGUE_GUID = os.getenv("LEAGUE_GUID")
 SEASON_GUID = os.getenv("SEASON_GUID")
+if not LEAGUE_GUID:
+    st.error("LEAGUE_GUID is not configured.")
+    st.stop()
 HEADERS = {"Content-Type": "application/json"}
 
 # iScore is occasionally flaky for a second or two. That is survivable; caching
@@ -224,10 +227,10 @@ def get_team_stats_aggregated(team_guid, players_df):
                     "R":   b.get("R"),   "RBI": b.get("RBI"),
                     "BB":  b.get("BB"),  "SO":  b.get("SO"),
                     "HBP": b.get("HBP"), "SB":  season_data.get("running", {}).get("overall", {}).get("SB", 0),
-                    "AVG": round(r.get("AVG", 0), 3),
-                    "OBP": round(r.get("OBP", 0), 3),
-                    "SLG": round(r.get("SLG", 0), 3),
-                    "OPS": round(r.get("OPS", 0), 3),
+                    "AVG": round((r.get("AVG") or 0), 3),
+                    "OBP": round((r.get("OBP") or 0), 3),
+                    "SLG": round((r.get("SLG") or 0), 3),
+                    "OPS": round((r.get("OPS") or 0), 3),
                 })
 
             # ── Pitching ─────────────────────────────────────
@@ -243,10 +246,10 @@ def get_team_stats_aggregated(team_guid, players_df):
                     "R":    p.get("R"),     "ER": p.get("ER"),
                     "BB":   p.get("BB"),    "SO": p.get("SO"),
                     "HR":   p.get("HR"),    "NP": p.get("PITCHES"),
-                    "ERA":  round(r.get("ERA",  0), 2),
-                    "WHIP": round(r.get("WHIP", 0), 2),
-                    "K9":   round(r.get("K9",   0), 2),
-                    "BB9":  round(r.get("BB9",  0), 2),
+                    "ERA":  round((r.get("ERA") or 0), 2),
+                    "WHIP": round((r.get("WHIP") or 0), 2),
+                    "K9":   round((r.get("K9") or 0), 2),
+                    "BB9":  round((r.get("BB9") or 0), 2),
                 })
 
     batting_df = pd.DataFrame(batting_rows).drop_duplicates()

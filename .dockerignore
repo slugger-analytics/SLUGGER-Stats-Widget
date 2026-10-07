@@ -5,3 +5,9 @@ __pycache__
 *.pyc
 .git
 *.log
+.env
+.venv-test
+tests
+.github
+.devcontainer
+find_guids.py

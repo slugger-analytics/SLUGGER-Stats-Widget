@@ -293,7 +293,7 @@ except UpstreamError as e:
     stop_on_upstream_error(e)
 
 if not pitching_df.empty:
-    pitching_df = pitching_df.sort_values("BF", ascending=False)
+    pitching_df = pitching_df.assign(_ip=pitching_df["IP"].astype(float)).sort_values("_ip", ascending=False).drop(columns="_ip")
 if not batting_df.empty:
     batting_df = batting_df.sort_values("PA", ascending=False)
 

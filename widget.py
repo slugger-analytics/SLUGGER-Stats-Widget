@@ -260,6 +260,7 @@ def get_team_stats_aggregated(team_guid, players_df):
 
 
 st.title("ALPB Player Stats")
+st.markdown("<style>#MainMenu, footer, header {visibility: hidden;} .block-container {padding-top: 1rem;} h1 {color: #000c66; border-bottom: 3px solid #c62127; padding-bottom: .4rem;}</style>", unsafe_allow_html=True)
 
 def stop_on_upstream_error(error):
     """Report an outage as a live, retryable condition rather than a dead page.
@@ -290,6 +291,11 @@ try:
     batting_df, pitching_df = get_team_stats_aggregated(team_guid, players_df)
 except UpstreamError as e:
     stop_on_upstream_error(e)
+
+if not pitching_df.empty:
+    pitching_df = pitching_df.assign(_ip=pitching_df["IP"].astype(float)).sort_values("_ip", ascending=False).drop(columns="_ip")
+if not batting_df.empty:
+    batting_df = batting_df.sort_values("PA", ascending=False)
 
 tab1, tab2 = st.tabs(["Pitchers", "Hitters"])
 

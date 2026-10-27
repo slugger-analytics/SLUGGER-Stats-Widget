@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import requests
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -10,6 +12,7 @@ import os
 from io import BytesIO
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 from stats_utils import select_season_rows
 
 
@@ -142,6 +145,12 @@ class UpstreamError(RuntimeError):
 # indefinitely, and the user just sees a spinner that never resolves.
 FETCH_TIMEOUT = (5, 20)
 
+# A cold team used to cost one sequential round trip per player. The calls are
+# independent and network bound, so a small pool cuts a cold load from roughly
+# (players x latency) to (players x latency / MAX_WORKERS). Kept modest so one
+# page load does not hammer iScore.
+MAX_WORKERS = 8
+
 
 def fetch(endpoint, params=None):
     url = f"{BASE_URL}/{endpoint}"
@@ -186,25 +195,50 @@ def get_player_stats(player_guid):
     rows = data if isinstance(data, list) else data.get("items", data.get("data", []))
     return pd.DataFrame(rows)
 
+
+def fetch_all_player_stats(player_guids):
+    """Fetch every player's stats concurrently, preserving input order.
+
+    Worker threads need the script run context attached or Streamlit logs a
+    "missing ScriptRunContext" warning per thread. If any fetch raises, the
+    first UpstreamError propagates out of ``pool.map`` when its result is
+    reached, which fails the whole aggregate build and so keeps a partial team
+    table out of the cache, exactly as the sequential loop did.
+    """
+    ctx = get_script_run_ctx()
+
+    def _attach_context():
+        if ctx is not None:
+            add_script_run_ctx(threading.current_thread(), ctx)
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS,
+                            initializer=_attach_context) as pool:
+        return list(pool.map(get_player_stats, player_guids))
+
+
 @st.cache_data(ttl=1800)
 def get_team_stats_aggregated(team_guid, players_df):
     """Fetch stats for every player on the team and build batting + pitching tables."""
     batting_rows = []
     pitching_rows = []
 
-    for _, player in players_df.iterrows():
-        player_guid = player["player_guid"]
+    # A team with no roster yet comes back as a column-less DataFrame.
+    if players_df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    # A player whose stats call fails must not just vanish from the table.
+    # Measured on Lancaster: two injected blips turned 26 batters into 25 and
+    # 27 pitchers into 26, and the short table was then cached as the team's
+    # authoritative roster for the full aggregate TTL with nothing on screen
+    # saying it was incomplete. Failing the build keeps the cache empty, so a
+    # rerun rebuilds it whole.
+    all_stats = fetch_all_player_stats(players_df["player_guid"].tolist())
+
+    for (_, player), stats_df in zip(players_df.iterrows(), all_stats):
         name = player["PLAYER"]
         throws = player.get("throwsHand", "")
         bats = player.get("bats", "")
 
-        # A player whose stats call fails must not just vanish from the table.
-        # Measured on Lancaster: two injected blips turned 26 batters into 25 and
-        # 27 pitchers into 26, and the short table was then cached as the team's
-        # authoritative roster for the full aggregate TTL with nothing on screen
-        # saying it was incomplete. Failing the build keeps the cache empty, so a
-        # rerun rebuilds it whole.
-        stats_df = get_player_stats(player_guid)
         if stats_df.empty:
             continue
 
@@ -283,12 +317,26 @@ if teams_df.empty:
     st.warning("The league returned no teams.")
     st.stop()
 
+# Visiting the app with ?warm=1 loads every team into the server's cache so the
+# first real visitor never waits on a cold team. The cache lives in the server
+# process, so a separate script cannot do this. Entries expire with
+# get_team_stats_aggregated's TTL, so re-warm shortly before a demo.
+if st.query_params.get("warm") == "1":
+    try:
+        with st.spinner("Warming the cache for every team..."):
+            for _guid in teams_df["team_guid"]:
+                get_team_stats_aggregated(_guid, get_team_players(_guid))
+        st.success(f"Warmed {len(teams_df)} teams.")
+    except UpstreamError as e:
+        stop_on_upstream_error(e)
+
 selected_team = st.selectbox("Select a Team", sorted(teams_df["TEAM"].dropna().unique()))
 team_guid = teams_df[teams_df["TEAM"] == selected_team].iloc[0]["team_guid"]
 
 try:
-    players_df = get_team_players(team_guid)
-    batting_df, pitching_df = get_team_stats_aggregated(team_guid, players_df)
+    with st.spinner(f"Loading {selected_team} stats. A team's first load can take a few seconds."):
+        players_df = get_team_players(team_guid)
+        batting_df, pitching_df = get_team_stats_aggregated(team_guid, players_df)
 except UpstreamError as e:
     stop_on_upstream_error(e)
 

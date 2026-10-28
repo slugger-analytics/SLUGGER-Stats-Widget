@@ -7,8 +7,9 @@ All data comes live from the iScore public API. There is no database and nothing
 ## What you can do with it
 
 - Select any ALPB team from a dropdown.
-- Read a Pitchers tab sorted by innings pitched and a Hitters tab sorted by plate appearances, so the players with the biggest workloads lead and tiny samples sink to the bottom.
-- Choose which stat columns appear. Click any column header to re-sort, for example by ERA or OPS.
+- Read hitters and pitchers on one page. Hitters are sorted by plate appearances and pitchers by batters faced, so the players with the biggest workloads lead and tiny samples sink to the bottom.
+- Switch between views built the way scouting reports are. Hitters have Traditional, Slash Line, Power and Discipline. Pitchers have Traditional, Rates and Workload. All shows every stat and Custom lets you pick your own.
+- Click any column header to re-sort, for example by ERA or OPS, and hover a header for what the stat means.
 - Download the exact table you are looking at as a landscape PDF, ready to print for a scouting sheet or a pregame meeting.
 
 ## Quick start
@@ -60,7 +61,7 @@ python -m pytest
 The tests never contact iScore. They replace the network layer with a stub and drive the real app through Streamlit's `AppTest`, so they check what a visitor would actually see. They cover the following.
 
 - `test_load_speed_and_warmup.py` covers concurrent fetching, workload sorting, a team with no roster, and the cache warm-up link.
-- `test_upstream_resilience.py` covers an iScore outage not being cached, request timeouts, and clearing the column picker not crashing the page.
+- `test_upstream_resilience.py` covers the views and derived stats, an iScore outage not being cached, request timeouts, and clearing the custom column picker not crashing the page.
 - `test_cache_ttls.py` checks that every cached function declares a time limit.
 - `test_season_filter.py` covers the current-season selection logic in `stats_utils.py`.
 
@@ -69,7 +70,7 @@ The tests never contact iScore. They replace the network layer with a stub and d
 1. `get_league_teams` loads the team list.
 2. `get_team_players` loads the roster for the selected team.
 3. `get_team_stats_aggregated` requests every player's stats in parallel (up to 8 at a time), keeps only the configured season, and builds one batting table and one pitching table. A player appears in a table only if they have at least one plate appearance or batter faced.
-4. The page sorts the tables by workload and renders them. The PDF is generated from the same sorted table and the columns you selected.
+4. The page adds derived stats (ISO, BB%, K% and K/BB), sorts by workload and renders one table per view. The PDF is generated from the same sorted table and the columns on screen.
 
 ### Caching and failure handling
 
@@ -103,7 +104,7 @@ find_guids.py                 Standalone tool for finding league and season GUID
 tests/                        Pytest suite, no network access needed
 requirements.txt              Runtime dependencies, pinned
 requirements-dev.txt          Runtime dependencies plus pytest
-.streamlit/config.toml        Navy and red theme
+.streamlit/config.toml        Dark navy and red theme
 Dockerfile                    Container image used in production
 aws/task-definition.json      ECS Fargate task definition
 .github/workflows/deploy.yml  Build, deploy, and smoke test on every push to main

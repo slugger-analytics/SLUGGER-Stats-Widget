@@ -11,6 +11,9 @@ They pin the things a live audience would notice.
 * ``?warm=1`` loads every team once and later renders come from the cache.
 * A team with no roster renders an empty state instead of crashing.
 * Tables open sorted by workload, so a one-out sample never leads the table.
+
+Hitters render first and pitchers second on one page, and the name column is
+called PLAYER in both.
 """
 import os
 import sys
@@ -134,10 +137,10 @@ def _app(monkeypatch, feed):
 def test_tables_open_sorted_by_workload(monkeypatch):
     at = _app(monkeypatch, _Feed()).run()
     assert not at.exception
-    pitchers = at.dataframe[0].value["PITCHER"].tolist()
-    hitters = at.dataframe[1].value["BATTER"].tolist()
-    assert pitchers == ["Ace, Al", "Okay, Oz", "Tiny, Tim"]
+    hitters = at.dataframe[0].value["PLAYER"].tolist()
+    pitchers = at.dataframe[1].value["PLAYER"].tolist()
     assert hitters == ["Star, Stu", "Mid, Max", "Small, Sam"]
+    assert pitchers == ["Ace, Al", "Okay, Oz", "Tiny, Tim"]
 
 
 def test_player_stats_are_fetched_concurrently(monkeypatch):
@@ -165,7 +168,7 @@ def test_a_failed_fetch_in_a_worker_thread_is_not_cached_as_a_short_roster(monke
     # Same process, same cache, upstream healthy again.
     at = at.run()
     assert not at.exception
-    hitters = at.dataframe[1].value["BATTER"].tolist()
+    hitters = at.dataframe[0].value["PLAYER"].tolist()
     assert "Mid, Max" in hitters, "the player who failed once never came back"
 
 

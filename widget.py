@@ -294,7 +294,35 @@ def get_team_stats_aggregated(team_guid, players_df):
 
 
 st.title("ALPB Player Stats")
-st.markdown("<style>#MainMenu, footer, header {visibility: hidden;} .block-container {padding-top: 1rem;} h1 {color: #000c66; border-bottom: 3px solid #c62127; padding-bottom: .4rem;}</style>", unsafe_allow_html=True)
+STYLE = """
+<style>
+#MainMenu, footer, header {visibility: hidden;}
+.block-container {padding-top: 1.5rem; max-width: 1100px;}
+h1 {color: #ffffff; border-bottom: 3px solid #c62127; padding-bottom: .5rem;}
+h2, h3 {color: #ffffff;}
+
+/* Column picker chips, quiet navy pills instead of loud red blocks */
+span[data-tag] {
+    background-color: #24316f !important;
+    color: #e8ecff !important;
+    border-radius: 999px !important;
+    font-size: 0.8rem;
+}
+span[data-tag] svg {fill: #9fb0ff !important;}
+
+/* Collapsed "Customize columns" section */
+div[data-testid="stExpander"] details {
+    background-color: #0f1741;
+    border: 1px solid #2c3a85;
+    border-radius: 10px;
+}
+div[data-testid="stExpander"] summary {color: #cfd8ff;}
+
+/* Tabs */
+button[data-baseweb="tab"] {font-size: 1.05rem;}
+</style>
+"""
+st.markdown(STYLE, unsafe_allow_html=True)
 
 def stop_on_upstream_error(error):
     """Report an outage as a live, retryable condition rather than a dead page.
@@ -372,14 +400,13 @@ with tab1:
             if c in pitching_df.columns
         ]
 
-        selected_cols = st.multiselect(
-            "Select stats to display",
-            options=allowed_cols,
-            default=default_cols,
-            key="pitcher_cols"
-        )
-
-        st.subheader("Pitcher Season Stats")
+        with st.expander("Customize columns"):
+            selected_cols = st.multiselect(
+                "Select stats to display",
+                options=allowed_cols,
+                default=default_cols,
+                key="pitcher_cols"
+            )
 
         st.dataframe(
             pitching_df[selected_cols],
@@ -434,14 +461,13 @@ with tab2:
             if c in batting_df.columns
         ]
 
-        selected_cols = st.multiselect(
-            "Select stats to display",
-            options=allowed_cols,
-            default=default_cols,
-            key="hitter_cols"
-        )
-
-        st.subheader("Hitter Season Stats")
+        with st.expander("Customize columns"):
+            selected_cols = st.multiselect(
+                "Select stats to display",
+                options=allowed_cols,
+                default=default_cols,
+                key="hitter_cols"
+            )
 
         st.dataframe(
             batting_df[selected_cols],

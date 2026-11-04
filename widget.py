@@ -12,10 +12,41 @@ import os
 from io import BytesIO
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-from stats_utils import select_season_rows
+from stats_utils import (
+    select_season_rows,
+    ip_to_innings,
+    filter_min_sample,
+    median_cut,
+    classify_hitters,
+    classify_pitchers,
+    hitter_actions,
+    pitcher_actions,
+    HITTER_QUADRANTS,
+    PITCHER_QUADRANTS,
+    rank_among,
+    ordinal,
+)
 
 st.set_page_config(page_title="ALPB Player Stats", layout="wide")
+
+
+# -------------------
+# Brand palette (single place to change colors)
+# -------------------
+# Placeholder SARG palette, ink and red with warm accents and no blue. Swap in
+# the official SARG hex values here and in .streamlit/config.toml.
+INK = "#1b1f2a"
+ACCENT = "#c62127"
+PANEL = "#f5f4ef"
+QUAD_GOOD = "#1f9d8a"     # best quadrant
+QUAD_MIXED_A = "#e0a800"  # good on the y stat only
+QUAD_MIXED_B = "#e8853d"  # good on the x stat only
+QUAD_BAD = "#c62127"      # worst quadrant
 
 
 # -------------------
@@ -121,7 +152,7 @@ def generate_pdf(df, title, subtitle, selected_cols):
     custom_title_style = ParagraphStyle(
         name="CustomTitle",
         parent=styles["Title"],
-        textColor=colors.HexColor("#000c66"),
+        textColor=colors.HexColor(INK),
         fontSize=14,
         alignment=1
     )
@@ -129,7 +160,7 @@ def generate_pdf(df, title, subtitle, selected_cols):
     subtitle_style = ParagraphStyle(
         name="SubtitleStyle",
         parent=styles["Normal"],
-        textColor=colors.HexColor("#c62127"),
+        textColor=colors.HexColor(ACCENT),
         fontSize=9,
         alignment=1
     )
@@ -137,7 +168,7 @@ def generate_pdf(df, title, subtitle, selected_cols):
     date_style = ParagraphStyle(
         name="DateStyle",
         parent=styles["Normal"],
-        textColor=colors.HexColor("#000c66"),
+        textColor=colors.HexColor(INK),
         fontSize=7,
         alignment=1
     )
@@ -169,7 +200,7 @@ def generate_pdf(df, title, subtitle, selected_cols):
 
     table = Table(data, repeatRows=1, colWidths=col_widths)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0072eb")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(INK)),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("ALIGN", (0, 0), (0, -1), "LEFT"),
@@ -179,8 +210,8 @@ def generate_pdf(df, title, subtitle, selected_cols):
         ("FONTSIZE", (0, 1), (-1, -1), body_size),
         ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
         ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef3fb")]),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(PANEL)]),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#9ca3af")),
     ]))
     elements.append(table)
 
@@ -360,14 +391,14 @@ STYLE = """
 .block-container {padding-top: 1.5rem;}
 h1 {border-bottom: 3px solid #c62127; padding-bottom: .5rem;}
 
-/* Column picker chips, quiet navy pills instead of loud red blocks */
+/* Column picker chips, quiet grey pills instead of loud red blocks */
 span[data-tag] {
-    background-color: #24316f !important;
-    color: #e8ecff !important;
+    background-color: #e5e7eb !important;
+    color: #1b1f2a !important;
     border-radius: 999px !important;
     font-size: 0.8rem;
 }
-span[data-tag] svg {fill: #9fb0ff !important;}
+span[data-tag] svg {fill: #6b7280 !important;}
 </style>
 """
 
@@ -408,6 +439,228 @@ def add_pitcher_metrics(df):
 
 
 # -------------------
+# Quadrants and insights
+# -------------------
+def short_name(name):
+    """'Batter, Bob' becomes 'Batter B.' so teammates sharing a surname stay distinct."""
+    parts = str(name).split(",")
+    if len(parts) > 1 and parts[1].strip():
+        return f"{parts[0].strip()} {parts[1].strip()[:1]}."
+    return str(name)
+
+
+def quadrant_chart(df, x_col, y_col, x_cut, y_cut, x_low_good, y_low_good,
+                   x_label, y_label, quad_map, highlight=None, title=None):
+    """Scatter with cutoff lines. Both axes are oriented so good is right and up."""
+    quad_colors = {
+        quad_map[(True, True)]: QUAD_GOOD,
+        quad_map[(False, True)]: QUAD_MIXED_A,
+        quad_map[(True, False)]: QUAD_MIXED_B,
+        quad_map[(False, False)]: QUAD_BAD,
+    }
+    xs = pd.to_numeric(df[x_col], errors="coerce")
+    ys = pd.to_numeric(df[y_col], errors="coerce")
+
+    def bounds(vals, cut):
+        lo, hi = min(vals.min(), cut), max(vals.max(), cut)
+        pad = (hi - lo) * 0.12 or 1.0
+        return lo - pad, hi + pad
+
+    x_lo, x_hi = bounds(xs, x_cut)
+    y_lo, y_hi = bounds(ys, y_cut)
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.2))
+    x_good = (x_lo, x_cut) if x_low_good else (x_cut, x_hi)
+    x_bad = (x_cut, x_hi) if x_low_good else (x_lo, x_cut)
+    y_good = (y_lo, y_cut) if y_low_good else (y_cut, y_hi)
+    y_bad = (y_cut, y_hi) if y_low_good else (y_lo, y_cut)
+    shade = [
+        (x_good, y_good, QUAD_GOOD),
+        (x_bad, y_good, QUAD_MIXED_A),
+        (x_good, y_bad, QUAD_MIXED_B),
+        (x_bad, y_bad, QUAD_BAD),
+    ]
+    for (xa, xb), (ya, yb), color in shade:
+        ax.add_patch(Rectangle((xa, ya), xb - xa, yb - ya,
+                               facecolor=color, alpha=0.10, linewidth=0, zorder=1))
+
+    ax.scatter(xs, ys, c=[quad_colors[q] for q in df["QUADRANT"]], s=70,
+               edgecolor="white", linewidth=0.8, zorder=3)
+    if highlight is not None:
+        picked = df["PLAYER"] == highlight
+        if picked.any():
+            ax.scatter(xs[picked], ys[picked], s=240, facecolors="none",
+                       edgecolors=INK, linewidths=2, zorder=6)
+    for name, x, y in zip(df["PLAYER"], xs, ys):
+        ax.annotate(short_name(name), (x, y), xytext=(5, 4),
+                    textcoords="offset points", fontsize=7, color=INK, zorder=4)
+
+    ax.axvline(x_cut, color=INK, linestyle="--", linewidth=1, zorder=2)
+    ax.axhline(y_cut, color=INK, linestyle="--", linewidth=1, zorder=2)
+    ax.set_xlim((x_hi, x_lo) if x_low_good else (x_lo, x_hi))
+    ax.set_ylim((y_hi, y_lo) if y_low_good else (y_lo, y_hi))
+    ax.set_xlabel(x_label + (" (lower is better)" if x_low_good else " (higher is better)"))
+    ax.set_ylabel(y_label + (" (lower is better)" if y_low_good else " (higher is better)"))
+
+    corners = [
+        (0.98, 0.97, "right", "top", quad_map[(True, True)], QUAD_GOOD),
+        (0.02, 0.97, "left", "top", quad_map[(False, True)], QUAD_MIXED_A),
+        (0.98, 0.03, "right", "bottom", quad_map[(True, False)], QUAD_MIXED_B),
+        (0.02, 0.03, "left", "bottom", quad_map[(False, False)], QUAD_BAD),
+    ]
+    for cx, cy, ha, va, label, color in corners:
+        ax.text(cx, cy, label, transform=ax.transAxes, ha=ha, va=va,
+                fontsize=9, fontweight="bold", color=color, zorder=5)
+
+    if title:
+        ax.set_title(title, loc="left", fontsize=11, fontweight="bold", color=INK)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+def render_actions(notes):
+    """List the coaching notes grouped by quadrant."""
+    if not notes:
+        st.caption("No players to summarize.")
+        return
+    seen = []
+    for _, quadrant, _ in notes:
+        if quadrant not in seen:
+            seen.append(quadrant)
+    for quadrant in seen:
+        st.markdown(f"**{quadrant}**")
+        for name, q, action in notes:
+            if q == quadrant:
+                st.markdown(f"- {name}. {action}")
+
+
+def render_quadrants(df, kind, key, team, highlight=None):
+    """Thresholds, a quadrant chart and rule-based insights for one table.
+
+    Everything lives in one collapsed section so the page stays short. The
+    minimum sample and the cutoff lines only shape the chart and the insights.
+    The table above keeps every player so nobody disappears from the box score.
+    Returns the context a player card needs to judge one player the same way.
+    """
+    if kind == "hitter":
+        size_label, size_max, size_default = "Minimum Plate Appearances", 250, 20
+        x_col, y_col = "K%", "BB%"
+        x_low_good, y_low_good = True, False
+        quad_map, digits = HITTER_QUADRANTS, 1
+        chart_title = "Plate Discipline"
+        classify, actions = classify_hitters, hitter_actions
+        step = 0.5
+    else:
+        size_label, size_max, size_default = "Minimum Innings Pitched", 60, 5
+        x_col, y_col = "K9", "BB9"
+        x_low_good, y_low_good = False, True
+        quad_map, digits = PITCHER_QUADRANTS, 2
+        chart_title = "Strikeouts and Walks"
+        classify, actions = classify_pitchers, pitcher_actions
+        step = 0.1
+
+    view = df.copy()
+    if kind == "pitcher":
+        view["INN"] = view["IP"].map(ip_to_innings)
+        size_col = "INN"
+    else:
+        size_col = "PA"
+
+    with st.expander("Team Insights, Quadrants, and Thresholds", expanded=False):
+        st.caption("The minimum and cutoffs apply only to the chart and notes. "
+                   "The table lists every player.")
+        left, right = st.columns(2)
+        with left:
+            minimum = st.slider(size_label, 0, size_max, size_default, key=f"{key}_min")
+        with right:
+            cut_mode = st.radio("Cutoff Lines", ["Team Median", "Custom"],
+                                horizontal=True, key=f"{key}_cut_mode")
+
+        sample = filter_min_sample(view, size_col, minimum)
+        base = sample if not sample.empty else view
+        x_cut = median_cut(base[x_col], digits)
+        y_cut = median_cut(base[y_col], digits)
+        if cut_mode == "Custom":
+            c_left, c_right = st.columns(2)
+            with c_left:
+                x_cut = st.number_input(f"{x_col} Cutoff", value=float(x_cut), step=step,
+                                        key=f"{key}_x_cut_{team}")
+            with c_right:
+                y_cut = st.number_input(f"{y_col} Cutoff", value=float(y_cut), step=step,
+                                        key=f"{key}_y_cut_{team}")
+
+        classified = None
+        if sample.empty:
+            st.info(f"No players meet the minimum of {minimum}. Lower the threshold.")
+        else:
+            hidden = len(view) - len(sample)
+            if hidden:
+                st.caption(f"{hidden} player(s) below the minimum are excluded from the chart and insights.")
+            classified = classify(sample, x_cut, y_cut)
+            fig = quadrant_chart(classified, x_col, y_col, x_cut, y_cut,
+                                 x_low_good, y_low_good, x_col, y_col, quad_map,
+                                 highlight=highlight, title=chart_title)
+            st.pyplot(fig)
+            plt.close(fig)
+            st.caption("Dashed lines mark the cutoffs, and the strongest performers appear toward the upper right. "
+                       "A ringed point is the player selected in the table.")
+            st.markdown("**Actionable Insights**")
+            render_actions(actions(classified))
+
+    return {
+        "view": view, "sample": sample, "classified": classified,
+        "x_cut": x_cut, "y_cut": y_cut, "minimum": minimum, "size_col": size_col,
+        "classify": classify, "actions": actions,
+    }
+
+
+# Stat tiles on a player card as (column, high_is_good). None means no ranking.
+HITTER_TILES = [("PA", None), ("AVG", True), ("OBP", True), ("SLG", True),
+                ("OPS", True), ("HR", True), ("K%", False), ("BB%", True)]
+PITCHER_TILES = [("IP", None), ("ERA", False), ("WHIP", False), ("K9", True),
+                 ("BB9", False), ("K/BB", True)]
+
+
+def render_player_card(player, ctx, kind):
+    """One player's line, where they rank on the team, and a note on how to use them."""
+    view, sample = ctx["view"], ctx["sample"]
+    all_classified = ctx["classify"](view, ctx["x_cut"], ctx["y_cut"])
+    row = all_classified.loc[player.name]
+    reference = ctx["classified"] if ctx["classified"] is not None else all_classified
+    note = ctx["actions"](all_classified.loc[[player.name]], reference=reference)[0]
+
+    tiles = HITTER_TILES if kind == "hitter" else PITCHER_TILES
+    hand = player.get("BATS") if kind == "hitter" else player.get("THROWS")
+    hand = {"R": "Right", "L": "Left", "S": "Switch", "B": "Switch"}.get(str(hand).upper(), hand)
+    hand_label = "Bats" if kind == "hitter" else "Throws"
+
+    # Rank against the qualified players plus this one, so a small sample can
+    # still be placed without dragging the whole group's ranks around.
+    pool = view.loc[[player.name]] if sample.empty else pd.concat(
+        [sample, view.loc[[player.name]]]).loc[lambda d: ~d.index.duplicated()]
+
+    with st.container(border=True):
+        st.markdown(f"### {player['PLAYER']}")
+        st.caption(f"{hand_label} {hand}  |  {row['QUADRANT']}")
+        size = row[ctx["size_col"]]
+        if size < ctx["minimum"]:
+            st.warning("Small sample size. Interpret these figures and rankings with caution.")
+
+        cols = st.columns(len(tiles))
+        for slot, (col, high_good) in zip(cols, tiles):
+            with slot:
+                st.metric(col, format_cell(col, player.get(col)), help=HELP.get(col))
+                if high_good is not None:
+                    ranked = rank_among(pool, player.get(col), col, high_good)
+                    if ranked:
+                        st.caption(f"{ordinal(ranked[0])} of {ranked[1]}")
+
+        st.markdown(f"**{note[1]}.** {note[2]}")
+
+
+# -------------------
 # Rendering
 # -------------------
 def column_config_for(columns):
@@ -427,7 +680,7 @@ def column_config_for(columns):
 
 
 def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
-                   view_key, picker_key, pdf_title, pdf_prefix, pdf_key, team):
+                   view_key, picker_key, pdf_title, pdf_prefix, pdf_key, team, quad_kind):
     """A heading, a row of views, one table, and a PDF of exactly that table.
 
     Views are never empty. Only Custom can be, and an empty selection must never
@@ -464,18 +717,21 @@ def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
         description, cols = views[view]
         shown = [c for c in cols if c in available]
 
-    st.caption(f"{description} {note}")
-    st.dataframe(
+    st.caption(f"{description} {note} Select a row to view the player card.")
+    event = st.dataframe(
         df[shown],
         column_config=column_config_for(shown),
         width="stretch",
         height="content",
         hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"{view_key}_table_{team}",
     )
 
     if shown:
         st.download_button(
-            label="🖨️ Download PDF",
+            label="Download PDF",
             data=generate_pdf(
                 df=df,
                 title=pdf_title,
@@ -488,6 +744,15 @@ def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
         )
     else:
         st.caption("Pick at least one column to export a PDF.")
+
+    rows = list(event.selection.rows) if event is not None else []
+    picked = df.iloc[rows[0]] if rows and rows[0] < len(df) else None
+    card_slot = st.container()
+    ctx = render_quadrants(df, quad_kind, key=view_key, team=team,
+                           highlight=None if picked is None else picked["PLAYER"])
+    if picked is not None:
+        with card_slot:
+            render_player_card(picked, ctx, quad_kind)
 
 
 # -------------------
@@ -536,36 +801,40 @@ pitching_df = add_pitcher_metrics(pitching_df)
 st.caption(f"{len(batting_df)} hitters and {len(pitching_df)} pitchers with season stats. "
            "Click any column header to sort. Hover a header for what the stat means.")
 
-render_section(
-    batting_df,
-    title="Hitters",
-    all_cols=HITTER_COLS,
-    views=HITTER_VIEWS,
-    sort_col="PA",
-    note="Sorted by plate appearances.",
-    empty_msg="No batting data available.",
-    view_key="hitter_view",
-    picker_key="hitter_cols",
-    pdf_title="Batting Season Stats",
-    pdf_prefix="batting_season",
-    pdf_key="pdf_batting_season",
-    team=selected_team,
-)
+hitters_tab, pitchers_tab = st.tabs(["Hitters", "Pitchers"])
 
-st.divider()
+with hitters_tab:
+    render_section(
+        batting_df,
+        title="Hitters",
+        all_cols=HITTER_COLS,
+        views=HITTER_VIEWS,
+        sort_col="PA",
+        note="Sorted by plate appearances.",
+        empty_msg="No batting data available.",
+        view_key="hitter_view",
+        picker_key="hitter_cols",
+        pdf_title="Batting Season Stats",
+        pdf_prefix="batting_season",
+        pdf_key="pdf_batting_season",
+        team=selected_team,
+        quad_kind="hitter",
+    )
 
-render_section(
-    pitching_df,
-    title="Pitchers",
-    all_cols=PITCHER_COLS,
-    views=PITCHER_VIEWS,
-    sort_col="BF",
-    note="Sorted by batters faced.",
-    empty_msg="No pitching data available.",
-    view_key="pitcher_view",
-    picker_key="pitcher_cols",
-    pdf_title="Pitcher Season Stats",
-    pdf_prefix="pitcher_season",
-    pdf_key="pdf_pitcher_season",
-    team=selected_team,
-)
+with pitchers_tab:
+    render_section(
+        pitching_df,
+        title="Pitchers",
+        all_cols=PITCHER_COLS,
+        views=PITCHER_VIEWS,
+        sort_col="BF",
+        note="Sorted by batters faced.",
+        empty_msg="No pitching data available.",
+        view_key="pitcher_view",
+        picker_key="pitcher_cols",
+        pdf_title="Pitcher Season Stats",
+        pdf_prefix="pitcher_season",
+        pdf_key="pdf_pitcher_season",
+        team=selected_team,
+        quad_kind="pitcher",
+    )

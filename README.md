@@ -7,7 +7,9 @@ All data comes live from the iScore public API. There is no database and nothing
 ## What you can do with it
 
 - Select any ALPB team from a dropdown.
-- Read hitters and pitchers on one page. Hitters are sorted by plate appearances and pitchers by batters faced, so the players with the biggest workloads lead and tiny samples sink to the bottom.
+- Switch between separate Hitters and Pitchers tabs. Hitters are sorted by plate appearances and pitchers by batters faced, so the players with the biggest workloads lead and tiny samples sink to the bottom.
+- Select a row to open a player card with that player's line, team rankings and a short usage note.
+- Open Team Insights to set minimum playing time and cutoff lines, view a quadrant chart (plate discipline for hitters, strikeouts and walks for pitchers) and read rule-based insights.
 - Switch between views built the way scouting reports are. Hitters have Traditional, Slash Line, Power and Discipline. Pitchers have Traditional, Rates and Workload. All shows every stat and Custom lets you pick your own.
 - Click any column header to re-sort, for example by ERA or OPS, and hover a header for what the stat means.
 - Download the exact table you are looking at as a landscape PDF, ready to print for a scouting sheet or a pregame meeting.

@@ -102,11 +102,11 @@ def test_every_upstream_call_carries_a_timeout(monkeypatch):
     assert all(t is not None for t in getter.state["timeouts"])
 
 
-def test_hitters_and_pitchers_share_one_page_without_tabs(monkeypatch):
+def test_hitters_and_pitchers_are_split_into_two_tabs(monkeypatch):
     at = _run(monkeypatch, _fake_get())
     assert not at.exception
     assert len(at.dataframe) == 2
-    assert len(at.tabs) == 0
+    assert [tab.label for tab in at.tabs] == ["Hitters", "Pitchers"]
     assert [s.value for s in at.subheader] == ["Hitters", "Pitchers"]
     assert len(at.segmented_control) == 2, "each section needs its own view selector"
 

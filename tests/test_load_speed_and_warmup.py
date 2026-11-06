@@ -12,7 +12,7 @@ They pin the things a live audience would notice.
 * A team with no roster renders an empty state instead of crashing.
 * Tables open sorted by workload, so a one-out sample never leads the table.
 
-Hitters render first and pitchers second on one page, and the name column is
+Hitters render first and pitchers second in separate tabs, and the name column is
 called PLAYER in both.
 """
 import os

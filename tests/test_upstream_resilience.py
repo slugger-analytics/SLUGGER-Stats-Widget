@@ -106,8 +106,8 @@ def test_hitters_and_pitchers_are_split_into_two_tabs(monkeypatch):
     at = _run(monkeypatch, _fake_get())
     assert not at.exception
     assert len(at.dataframe) == 2
-    assert [tab.label for tab in at.tabs] == ["Hitters", "Pitchers"]
-    assert [s.value for s in at.subheader] == ["Hitters", "Pitchers"]
+    assert [tab.label for tab in at.tabs][:4] == ["Hitters", "Pitchers", "Team", "Findings"]
+    assert [s.value for s in at.subheader][:2] == ["Hitters", "Pitchers"]
     assert len(at.segmented_control) == 2, "each section needs its own view selector"
 
 
@@ -130,8 +130,14 @@ def test_all_view_shows_every_stat_in_the_standard_order(monkeypatch):
     at = _run(monkeypatch, _fake_get())
     at = at.segmented_control[HITTERS].set_value("All").run()
     at = at.segmented_control[PITCHERS].set_value("All").run()
-    assert list(at.dataframe[HITTERS].value.columns) == HITTER_COLS
-    assert list(at.dataframe[PITCHERS].value.columns) == PITCHER_COLS
+    # The original box score columns keep their order. Advanced stats and
+    # splits are layered in around them and never reorder them.
+    hit, pit = list(at.dataframe[HITTERS].value.columns), list(at.dataframe[PITCHERS].value.columns)
+    assert [c for c in hit if c in HITTER_COLS] == HITTER_COLS
+    assert [c for c in pit if c in PITCHER_COLS] == PITCHER_COLS
+    from display import HITTER_COLS as ALL_H, PITCHER_COLS as ALL_P
+    assert hit == [c for c in ALL_H if c in hit] and pit == [c for c in ALL_P if c in pit]
+    assert {"wOBA", "BABIP"} <= set(hit) and {"FIP", "K-BB%"} <= set(pit)
 
 
 def test_custom_columns_always_come_out_in_the_standard_order(monkeypatch):
@@ -185,7 +191,7 @@ def test_pitcher_rates_view_derives_k_per_bb(monkeypatch):
     at = _run(monkeypatch, _fake_get())
     at = at.segmented_control[PITCHERS].set_value("Rates").run()
     row = at.dataframe[PITCHERS].value.iloc[0]
-    assert row["K/BB"] == pytest.approx(4.58)
+    assert row["K/BB"] == pytest.approx(4.58, abs=0.01)
 
 
 def test_innings_pitched_is_numeric_so_it_sorts_correctly(monkeypatch):

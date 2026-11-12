@@ -8,9 +8,11 @@ All data comes live from the iScore public API. There is no database and nothing
 
 - Select any ALPB team from a dropdown.
 - Switch between separate Hitters and Pitchers tabs. Hitters are sorted by plate appearances and pitchers by batters faced, so the players with the biggest workloads lead and tiny samples sink to the bottom.
-- Select a row to open a player card with that player's line, team rankings and a short usage note.
+- Select a row to open a player card with that player's line, team rank, league percentile, a regressed skill estimate and a short usage note.
+- Open the Team tab to see where a team ranks in the league on offense, pitching, defense and park effects.
+- Open the Findings tab for league research on what is skill and what is luck, with the strength of each result labeled.
 - Open Team Insights to set minimum playing time and cutoff lines, view a quadrant chart (plate discipline for hitters, strikeouts and walks for pitchers) and read rule-based insights.
-- Switch between views built the way scouting reports are. Hitters have Traditional, Slash Line, Power and Discipline. Pitchers have Traditional, Rates and Workload. All shows every stat and Custom lets you pick your own.
+- Switch between views built the way scouting reports are. Hitters have Traditional, Slash Line, Power, Discipline, Advanced and Splits. Pitchers have Traditional, Rates, Advanced, Command, Splits and Workload. All shows every stat and Custom lets you pick your own.
 - Click any column header to re-sort, for example by ERA or OPS, and hover a header for what the stat means.
 - Download the exact table you are looking at as a landscape PDF, ready to print for a scouting sheet or a pregame meeting.
 
@@ -66,6 +68,7 @@ The tests never contact iScore. They replace the network layer with a stub and d
 - `test_upstream_resilience.py` covers the views and derived stats, an iScore outage not being cached, request timeouts, and clearing the custom column picker not crashing the page.
 - `test_cache_ttls.py` checks that every cached function declares a time limit.
 - `test_season_filter.py` covers the current-season selection logic in `stats_utils.py`.
+- `test_metrics_and_league.py` covers the stat math, the multiple-testing correction, and the shape of the league report.
 
 ## How it works
 
@@ -97,12 +100,41 @@ http://localhost:8501/?warm=1
 
 On the deployed app the address is `https://www.alpb-analytics.com/widgets/stats/?warm=1`.
 
+## League research
+
+The Findings and Team tabs read `data/league_baselines.json`, a small file built from a snapshot of every ALPB player. League context needs all 539 players, which is about 550 iScore calls, so the app reads it from the file instead of fetching it on each visit. The 2026 season is over, so it does not go stale. To rebuild it, for example next season, run these from the repo root.
+
+```bash
+python scripts/snapshot_league.py        # pull iScore, about a minute, writes data/snapshot_YYYYMMDD.json
+python scripts/build_league_report.py    # crunch it, writes data/league_baselines.json
+```
+
+Commit `league_baselines.json`. The raw snapshot is about 20 MB and is git-ignored. To run the app against a snapshot with no network, use `streamlit run scripts/preview_from_snapshot.py`.
+
+If the file is missing the app still works. The Team and Findings tabs show a note, and the Advanced stats fall back to the selected team's own rates.
+
+### Method notes
+
+- wOBA uses MLB linear weights, since ALPB run values are not available. It ranks hitters well but its scale is approximate.
+- Regressed estimates (xK%, xBB%, xBABIP) pull a rate toward the league rate by sample size, using published stabilization points listed in `metrics.py`.
+- Skill versus luck is measured by correlating each player's home games with his road games and scaling the result to a full season.
+- Individual split and situation tests use a Benjamini-Hochberg false discovery correction, because testing a hundred hitters guarantees a handful of flukes at p < .05.
+
 ## Project structure
 
 ```
-widget.py                     The Streamlit app, data fetching, and PDF export
-stats_utils.py                Season selection logic, free of Streamlit so it is easy to test
+widget.py                     The page layout and tabs
+data.py                       iScore access, caching, and team table assembly
+metrics.py                    Stat math (wOBA, FIP, BABIP, shrinkage, tests), no Streamlit
+league.py                     League report builder and research, no Streamlit
+findings.py                   The Findings tab text, read from the league report
+charts.py                     Matplotlib figures
+display.py                    Column order, views, decimals, help text, palette
+report_pdf.py                 PDF export
+stats_utils.py                Season selection, quadrants and coaching notes, free of Streamlit
 find_guids.py                 Standalone tool for finding league and season GUIDs
+scripts/                      Snapshot, report build, and offline preview tools
+data/league_baselines.json    Precomputed league context
 tests/                        Pytest suite, no network access needed
 requirements.txt              Runtime dependencies, pinned
 requirements-dev.txt          Runtime dependencies plus pytest
@@ -132,7 +164,9 @@ The workflow signs in to AWS through GitHub OIDC, so no AWS keys are stored in t
 
 - Stats are season totals only. There are no game logs, fielding stats, or lefty and righty splits yet.
 - Numbers are as fresh as the cache, so they can lag iScore by up to 30 minutes.
-- The iScore leaderboard and games-by-player endpoints have not been made to work with this widget, so percentile rankings and hot and cold indicators are not built.
+- Hot and cold indicators need game logs, which the iScore endpoints used here do not provide.
+- League percentiles and findings come from a 2026 snapshot, not live data.
+- Home and road splits give a rough park factor, not a true one.
 
 ## Future work
 

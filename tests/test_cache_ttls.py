@@ -1,7 +1,7 @@
-"""Unit tests for the ``@st.cache_data`` TTLs in ``widget``.
+"""Unit tests for the ``@st.cache_data`` TTLs in ``data``.
 
-These parse ``widget.py`` with ``ast`` rather than importing it, since its
-module body executes network + Streamlit calls on import.
+These parse ``data.py`` with ``ast`` rather than importing it, so no
+Streamlit runtime is needed.
 """
 import ast
 import os
@@ -9,8 +9,8 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-WIDGET_PY = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "widget.py")
+DATA_PY = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "data.py")
 )
 
 # The TTL each cached function is expected to declare, in seconds.
@@ -19,13 +19,14 @@ EXPECTED_TTLS = {
     "get_team_players": 900,
     "get_player_stats": 900,
     "get_team_stats_aggregated": 1800,
+    "load_league_report": 86400,
 }
 # The roster TTL the sibling pitcher widget settled on (ROSTER_TTL_SECONDS).
 PITCHING_WIDGET_ROSTER_TTL = 900
 
 
 def _module():
-    with open(WIDGET_PY, encoding="utf-8") as fh:
+    with open(DATA_PY, encoding="utf-8") as fh:
         return ast.parse(fh.read())
 
 
@@ -60,7 +61,7 @@ def _ttl(decorator):
 def test_every_cache_data_decorator_declares_a_ttl():
     """(a) A bare ``@st.cache_data`` freezes data for the container's life."""
     cached = _cached_functions()
-    assert cached, "no @st.cache_data functions found — did widget.py move?"
+    assert cached, "no @st.cache_data functions found — did data.py move?"
     untimed = [
         name for name, decorator in cached.items() if _ttl(decorator) is None
     ]

@@ -171,7 +171,7 @@ def test_compare_does_no_work_until_switched_on(monkeypatch):
     feed = Feed()
     at = _run(monkeypatch, feed=feed)
     assert not at.exception, at.exception
-    assert [t.label for t in at.tabs][:4] == ["Hitters", "Pitchers", "Team", "Findings"]
+    assert [t.label for t in at.tabs] == ["Hitters", "Pitchers", "Team"]
     assert feed.trackman_calls == []
     assert not any(str(s.key).startswith("cmp_team") for s in at.selectbox)
 

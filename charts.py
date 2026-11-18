@@ -30,29 +30,6 @@ def _style(ax):
     ax.set_axisbelow(True)
 
 
-def reliability_chart(stats: dict, title: str):
-    """Horizontal bars, full-season reliability per stat. Longer means more skill."""
-    items = sorted(((k, v["season_r"]) for k, v in stats.items() if v["season_r"] == v["season_r"]),
-                   key=lambda kv: kv[1])
-    fig, ax = plt.subplots(figsize=(6, 3.4))
-    names = [k for k, _ in items]
-    vals = [max(v, 0) for _, v in items]
-    bars = ax.barh(names, vals, color=[QUAD_GOOD if v >= 0.6 else "#9ca3af" for v in vals],
-                   height=0.62)
-    for b, (_, v) in zip(bars, items):
-        ax.text(max(b.get_width(), 0) + 0.015, b.get_y() + b.get_height() / 2,
-                f"{v:.2f}", va="center", fontsize=8, color=INK)
-    ax.set_xlim(0, 1.05)
-    ax.set_xlabel("Reliability over a season (1.0 = pure skill, 0 = pure noise)",
-                  color=MUTED, fontsize=8)
-    ax.set_title(title, loc="left", fontsize=10, fontweight="bold", color=INK)
-    _style(ax)
-    ax.grid(axis="y", visible=False)
-    ax.grid(axis="x", color=GRID, linewidth=0.6)
-    fig.tight_layout()
-    return fig
-
-
 def team_bars(rows: pd.DataFrame, col: str, title: str, fmt: str, center: float,
               highlight: str | None = None, sort_ascending: bool = True,
               xlabel: str | None = None):
@@ -106,29 +83,5 @@ def era_fip_chart(pit: pd.DataFrame, highlight: str | None = None, title: str = 
     ax.set_title(title, loc="left", fontsize=10, fontweight="bold", color=INK)
     _style(ax)
     ax.grid(axis="x", color=GRID, linewidth=0.6)
-    fig.tight_layout()
-    return fig
-
-
-def reliability_panel(hit_stats: dict, pit_stats: dict, n_hit: int, n_pit: int):
-    """Hitters and pitchers side by side in one figure, so the page carries one chart."""
-    fig, axes = plt.subplots(1, 2, figsize=(9.2, 2.9), sharex=True)
-    for ax, stats, title in ((axes[0], hit_stats, f"Hitters (n = {n_hit})"),
-                             (axes[1], pit_stats, f"Pitchers (n = {n_pit})")):
-        items = sorted(((k, v["season_r"]) for k, v in stats.items()
-                        if v["season_r"] == v["season_r"]), key=lambda kv: kv[1])
-        vals = [max(v, 0) for _, v in items]
-        bars = ax.barh([k for k, _ in items], vals,
-                       color=[QUAD_GOOD if v >= 0.6 else "#9ca3af" for v in vals], height=0.62)
-        for b, (_, v) in zip(bars, items):
-            ax.text(max(b.get_width(), 0) + 0.015, b.get_y() + b.get_height() / 2,
-                    f"{v:.2f}", va="center", fontsize=7, color=INK)
-        ax.set_xlim(0, 1.05)
-        ax.set_title(title, loc="left", fontsize=9, fontweight="bold", color=INK)
-        _style(ax)
-        ax.grid(axis="y", visible=False)
-        ax.grid(axis="x", color=GRID, linewidth=0.6)
-    fig.supxlabel("Reliability over a season (1.0 is pure skill, 0 is pure noise)",
-                  color=MUTED, fontsize=8)
     fig.tight_layout()
     return fig

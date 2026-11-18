@@ -10,7 +10,6 @@ All data comes live from the iScore public API. There is no database and nothing
 - Switch between separate Hitters and Pitchers tabs. Hitters are sorted by plate appearances and pitchers by batters faced, so the players with the biggest workloads lead and tiny samples sink to the bottom.
 - Select a row to open a player card with that player's line, team rank, league percentile, a full Trackman breakdown (plate discipline, contact, batted ball) and a regressed skill estimate.
 - Open the Team tab to see where a team ranks in the league on offense, pitching, defense and park effects.
-- Open the Findings tab for league research on what is skill and what is luck, with the strength of each result labeled.
 - Turn on "Compare two hitters" or "Compare two pitchers" under either table to put two players from any teams head to head, the way Baseball Savant does it. The stat sits in the middle with a bar for each player, a longer bar is always better (the lower ERA or K% gets the full bar), the better rate is green, and totals are shown in grey but never scored, because more playing time always means bigger totals. Player 1 starts on whichever row is selected.
 - Switch between views built the way scouting reports are. Hitters have Traditional, Slash Line, Power, Discipline, Advanced and Splits. Pitchers have Traditional, Rates, Advanced, Command, Splits, Workload and Contact. Power adds Trackman's Barrel%, EV90 (90th percentile exit velocity), Hard-Hit%, Avg EV and Max EV. Discipline adds Zone%, Swing%, Z-Swing%, Chase% (swings at pitches outside the zone), Contact% and Whiff%. Pitcher Rates adds FB Velo, Zone%, F-Strike%, Chase%, Whiff% and CSW%, and Contact shows Barrel%, Hard-Hit% and GB% allowed. All shows every stat and Custom lets you pick your own.
 - Click any column header to re-sort, for example by ERA or OPS, and hover a header for what the stat means.
@@ -108,7 +107,7 @@ On the deployed app the address is `https://www.alpb-analytics.com/widgets/stats
 
 ## League research
 
-The Findings and Team tabs read `data/league_baselines.json`, a small file built from a snapshot of every ALPB player. League context needs all 539 players, which is about 550 iScore calls, so the app reads it from the file instead of fetching it on each visit. The 2026 season is over, so it does not go stale. To rebuild it, for example next season, run these from the repo root.
+The Team tab and the league percentiles read `data/league_baselines.json`, a small file built from a snapshot of every ALPB player. League context needs all 539 players, which is about 550 iScore calls, so the app reads it from the file instead of fetching it on each visit. The 2026 season is over, so it does not go stale. To rebuild it, for example next season, run these from the repo root.
 
 ```bash
 python scripts/snapshot_league.py        # pull iScore, about a minute, writes data/snapshot_YYYYMMDD.json
@@ -117,7 +116,7 @@ python scripts/build_league_report.py    # crunch it, writes data/league_baselin
 
 Commit `league_baselines.json`. The raw snapshot is about 20 MB and is git-ignored. To run the app against a snapshot with no network, use `streamlit run scripts/preview_from_snapshot.py`.
 
-If the file is missing the app still works. The Team and Findings tabs show a note, and the Advanced stats fall back to the selected team's own rates.
+If the file is missing the app still works. The Team tab shows a note, and the Advanced stats fall back to the selected team's own rates.
 
 ### Method notes
 
@@ -133,7 +132,6 @@ widget.py                     The page layout and tabs
 data.py                       iScore access, caching, and team table assembly
 metrics.py                    Stat math (wOBA, FIP, BABIP, shrinkage, tests), no Streamlit
 league.py                     League report builder and research, no Streamlit
-findings.py                   The Findings tab text, read from the league report
 charts.py                     Matplotlib figures
 display.py                    Column order, views, decimals, help text, palette
 report_pdf.py                 PDF export
@@ -182,7 +180,7 @@ iScore and Trackman do not share player ids, so `advanced.match_player_ids` matc
 - Stats are season totals only. There are no game logs, fielding stats, or lefty and righty splits yet.
 - Numbers are as fresh as the cache, so they can lag iScore by up to 30 minutes.
 - Hot and cold indicators need game logs, which the iScore endpoints used here do not provide.
-- League percentiles and findings come from a 2026 snapshot, not live data.
+- League percentiles and the Team tab come from a 2026 snapshot, not live data.
 - Home and road splits give a rough park factor, not a true one.
 
 ## Future work

@@ -2,7 +2,7 @@
 
 This file is the page. Data access lives in data.py, stat math in metrics.py
 and league.py, display rules in display.py, figures in charts.py, the PDF in
-report_pdf.py and the research text in findings.py.
+and report_pdf.py.
 """
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -31,7 +31,6 @@ from display import (
     format_cell,
     label,
 )
-from findings import render_findings
 from report_pdf import generate_pdf, pdf_filename
 from stats_utils import filter_min_sample, ip_to_innings, ordinal, rank_among
 
@@ -182,7 +181,7 @@ def _card_detail(player, kind, report):
                 f"({format_cell('vsR_PA', player.get('vsR_PA'))} PA), "
                 f"RISP {format_cell('RISP_OPS', player.get('RISP_OPS'))}.")
             st.caption("Individual splits rest on small samples. League-wide, almost no "
-                       "hitter's platoon or RISP split holds up as real. See the Findings tab.")
+                       "hitter's platoon or RISP split holds up as real.")
         else:
             if pd.notna(player.get("ERA-FIP")):
                 gap = float(player["ERA-FIP"])
@@ -425,8 +424,7 @@ batting_df, pitching_df, _base = enrich(batting_df, pitching_df, report)
 st.caption(f"{len(batting_df)} hitters and {len(pitching_df)} pitchers with season stats. "
            "Click any column header to sort. Hover a header for what the stat means.")
 
-hitters_tab, pitchers_tab, team_tab, findings_tab = st.tabs(
-    ["Hitters", "Pitchers", "Team", "Findings"])
+hitters_tab, pitchers_tab, team_tab = st.tabs(["Hitters", "Pitchers", "Team"])
 
 with hitters_tab:
     render_section(
@@ -448,6 +446,3 @@ with pitchers_tab:
 
 with team_tab:
     render_team_tab(selected_team, pitching_df, report)
-
-with findings_tab:
-    render_findings(report, selected_team)

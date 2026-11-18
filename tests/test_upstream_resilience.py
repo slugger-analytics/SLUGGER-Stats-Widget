@@ -106,7 +106,7 @@ def test_hitters_and_pitchers_are_split_into_two_tabs(monkeypatch):
     at = _run(monkeypatch, _fake_get())
     assert not at.exception
     assert len(at.dataframe) == 2
-    assert [tab.label for tab in at.tabs][:4] == ["Hitters", "Pitchers", "Team", "Findings"]
+    assert [tab.label for tab in at.tabs] == ["Hitters", "Pitchers", "Team"]
     assert [s.value for s in at.subheader][:2] == ["Hitters", "Pitchers"]
     assert len(at.segmented_control) == 2, "each section needs its own view selector"
 

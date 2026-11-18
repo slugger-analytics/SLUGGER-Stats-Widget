@@ -5,10 +5,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
-from matplotlib.patches import Rectangle
 
-from display import (ACCENT, GRID, INK, MUTED, QUAD_BAD, QUAD_GOOD,
-                     QUAD_MIXED_A, QUAD_MIXED_B)
+from display import ACCENT, GRID, INK, MUTED, QUAD_BAD, QUAD_GOOD
 
 
 def short_name(name):
@@ -30,70 +28,6 @@ def _style(ax):
     ax.tick_params(colors=MUTED, labelsize=8)
     ax.grid(axis="y", color=GRID, linewidth=0.6)
     ax.set_axisbelow(True)
-
-
-def quadrant_chart(df, x_col, y_col, x_cut, y_cut, x_low_good, y_low_good,
-                   x_label, y_label, quad_map, highlight=None, title=None):
-    """Scatter with cutoff lines. Both axes are oriented so good is right and up."""
-    quad_colors = {
-        quad_map[(True, True)]: QUAD_GOOD, quad_map[(False, True)]: QUAD_MIXED_A,
-        quad_map[(True, False)]: QUAD_MIXED_B, quad_map[(False, False)]: QUAD_BAD,
-    }
-    xs = pd.to_numeric(df[x_col], errors="coerce")
-    ys = pd.to_numeric(df[y_col], errors="coerce")
-
-    def bounds(vals, cut):
-        lo, hi = min(vals.min(), cut), max(vals.max(), cut)
-        pad = (hi - lo) * 0.12 or 1.0
-        return lo - pad, hi + pad
-
-    x_lo, x_hi = bounds(xs, x_cut)
-    y_lo, y_hi = bounds(ys, y_cut)
-    fig, ax = plt.subplots(figsize=(6.4, 4.2))
-    x_good = (x_lo, x_cut) if x_low_good else (x_cut, x_hi)
-    x_bad = (x_cut, x_hi) if x_low_good else (x_lo, x_cut)
-    y_good = (y_lo, y_cut) if y_low_good else (y_cut, y_hi)
-    y_bad = (y_cut, y_hi) if y_low_good else (y_lo, y_cut)
-    for (xa, xb), (ya, yb), color in [
-        (x_good, y_good, QUAD_GOOD), (x_bad, y_good, QUAD_MIXED_A),
-        (x_good, y_bad, QUAD_MIXED_B), (x_bad, y_bad, QUAD_BAD),
-    ]:
-        ax.add_patch(Rectangle((xa, ya), xb - xa, yb - ya, facecolor=color,
-                               alpha=0.10, linewidth=0, zorder=1))
-
-    ax.scatter(xs, ys, c=[quad_colors[q] for q in df["QUADRANT"]], s=70,
-               edgecolor="white", linewidth=1.5, zorder=3)
-    if highlight is not None:
-        picked = df["PLAYER"] == highlight
-        if picked.any():
-            ax.scatter(xs[picked], ys[picked], s=240, facecolors="none",
-                       edgecolors=INK, linewidths=2, zorder=6)
-    for name, x, y in zip(df["PLAYER"], xs, ys):
-        ax.annotate(short_name(name), (x, y), xytext=(5, 4), textcoords="offset points",
-                    fontsize=7, color=INK, zorder=4)
-
-    ax.axvline(x_cut, color=INK, linestyle="--", linewidth=1, zorder=2)
-    ax.axhline(y_cut, color=INK, linestyle="--", linewidth=1, zorder=2)
-    ax.set_xlim((x_hi, x_lo) if x_low_good else (x_lo, x_hi))
-    ax.set_ylim((y_hi, y_lo) if y_low_good else (y_lo, y_hi))
-    ax.set_xlabel(x_label + (" (lower is better)" if x_low_good else " (higher is better)"),
-                  color=MUTED, fontsize=9)
-    ax.set_ylabel(y_label + (" (lower is better)" if y_low_good else " (higher is better)"),
-                  color=MUTED, fontsize=9)
-    for cx, cy, ha, va, text, color in [
-        (0.98, 0.97, "right", "top", quad_map[(True, True)], QUAD_GOOD),
-        (0.02, 0.97, "left", "top", quad_map[(False, True)], "#9a6b00"),
-        (0.98, 0.03, "right", "bottom", quad_map[(True, False)], QUAD_MIXED_B),
-        (0.02, 0.03, "left", "bottom", quad_map[(False, False)], QUAD_BAD),
-    ]:
-        ax.text(cx, cy, text, transform=ax.transAxes, ha=ha, va=va,
-                fontsize=9, fontweight="bold", color=color, zorder=5)
-    if title:
-        ax.set_title(title, loc="left", fontsize=11, fontweight="bold", color=INK)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    fig.tight_layout()
-    return fig
 
 
 def reliability_chart(stats: dict, title: str):

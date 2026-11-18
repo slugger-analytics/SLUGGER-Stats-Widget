@@ -32,7 +32,13 @@
           "awslogs-stream-prefix": "ecs"
         }
       },
-      "systemControls": []
+      "systemControls": [],
+      "secrets": [
+        {
+          "name": "ALPB_API_KEY",
+          "valueFrom": "arn:aws:ssm:us-east-2:746669223415:parameter/slugger/pitching/alpb-api-key"
+        }
+      ]
     }
   ],
   "family": "slugger-stats",

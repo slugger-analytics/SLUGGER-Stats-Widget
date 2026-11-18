@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from advanced import STAT_INFO as TRACKMAN_STATS
+
 # ---------------------------------------------------------------------------
 # Palette. Ink and red brand, with a quadrant set that passes the colorblind
 # validator (teal, amber, violet, red; all-pairs CVD delta E >= 13).
@@ -20,6 +22,7 @@ QUAD_GOOD = "#1f9d8a"
 QUAD_MIXED_A = "#eda100"
 QUAD_MIXED_B = "#6250d6"
 QUAD_BAD = "#c62127"
+GOOD = QUAD_GOOD  # the better value in a player comparison
 
 # ---------------------------------------------------------------------------
 # Column order. Who, then volume, then counting stats, then rates, then
@@ -31,12 +34,18 @@ HITTER_COLS = [
     "ISO", "BB%", "K%", "BB/K", "wOBA", "BABIP", "xBABIP", "xK%", "xBB%",
     "vsL_PA", "vsL_OPS", "vsR_PA", "vsR_OPS", "RISP_PA", "RISP_OPS",
     "Home_OPS", "Away_OPS",
+    # Trackman, filled in only when a view that needs them is open
+    "Barrel%", "EV90", "Hard-Hit%", "Avg EV", "Max EV",
+    "Zone%", "Swing%", "Z-Swing%", "Chase%", "Contact%", "Whiff%",
 ]
 PITCHER_COLS = [
     "PLAYER", "THROWS", "ROLE", "G", "GS", "IP", "BF", "NP", "H", "R", "ER",
     "HR", "BB", "SO", "ERA", "FIP", "ERA-FIP", "WHIP", "K9", "BB9", "HR9",
     "K/BB", "K%", "BB%", "K-BB%", "BABIP_A", "STR%", "P/PA",
     "vsL_PA", "vsL_OPS", "vsR_PA", "vsR_OPS", "RISP_OPS",
+    # Trackman, filled in only when a view that needs them is open
+    "FB Velo", "Zone%", "F-Strike%", "Chase%", "Whiff%", "CSW%",
+    "Barrel%", "Hard-Hit%", "GB%",
 ]
 
 # Views follow scouting-report groupings, each answering one question.
@@ -46,10 +55,14 @@ HITTER_VIEWS = {
                      "RBI", "BB", "SO", "SB"]),
     "Slash Line": ("AVG / OBP / SLG / OPS, the one-glance summary of a hitter.",
                    ["PLAYER", "BATS", "PA", "AVG", "OBP", "SLG", "OPS"]),
-    "Power": ("Extra-base production. ISO is SLG minus AVG.",
-              ["PLAYER", "PA", "H", "2B", "3B", "HR", "RBI", "SLG", "ISO"]),
-    "Discipline": ("Plate approach. BB% and K% are per plate appearance.",
-                   ["PLAYER", "PA", "BB", "SO", "HBP", "BB%", "K%", "BB/K", "OBP"]),
+    "Power": ("Extra-base production and how hard the ball is hit. ISO is SLG minus AVG. "
+              "Barrel% onward comes from Trackman.",
+              ["PLAYER", "PA", "2B", "3B", "HR", "SLG", "ISO",
+               "Barrel%", "EV90", "Hard-Hit%", "Avg EV", "Max EV"]),
+    "Discipline": ("Plate approach. BB% and K% are per plate appearance. Zone% onward comes "
+                   "from Trackman, Chase% is swings at pitches outside the zone.",
+                   ["PLAYER", "PA", "BB%", "K%", "BB/K", "OBP",
+                    "Zone%", "Swing%", "Z-Swing%", "Chase%", "Contact%", "Whiff%"]),
     "Advanced": ("wOBA weights each way of reaching base by its run value. "
                  "x columns are the regressed estimates to trust over a small sample.",
                  ["PLAYER", "PA", "wOBA", "OPS", "BABIP", "xBABIP", "K%", "xK%", "BB%", "xBB%"]),
@@ -62,8 +75,10 @@ PITCHER_VIEWS = {
     "Traditional": ("The classic pitching line.",
                     ["PLAYER", "THROWS", "IP", "H", "R", "ER", "HR", "BB", "SO",
                      "ERA", "WHIP"]),
-    "Rates": ("Per-inning effectiveness. K/BB is strikeouts per walk.",
-              ["PLAYER", "THROWS", "IP", "ERA", "WHIP", "K9", "BB9", "K/BB"]),
+    "Rates": ("Per-inning effectiveness. K/BB is strikeouts per walk. FB Velo onward "
+              "comes from Trackman.",
+              ["PLAYER", "THROWS", "IP", "ERA", "WHIP", "K9", "BB9", "K/BB",
+               "FB Velo", "Zone%", "F-Strike%", "Chase%", "Whiff%", "CSW%"]),
     "Advanced": ("FIP is ERA built only from strikeouts, walks, HBP and homers. "
                  "K-BB% is the best single predictor of future runs allowed in ALPB data.",
                  ["PLAYER", "ROLE", "IP", "ERA", "FIP", "ERA-FIP", "K%", "BB%",
@@ -74,6 +89,8 @@ PITCHER_VIEWS = {
                ["PLAYER", "THROWS", "BF", "vsL_PA", "vsL_OPS", "vsR_PA", "vsR_OPS", "RISP_OPS"]),
     "Workload": ("How much each arm has been used.",
                  ["PLAYER", "THROWS", "ROLE", "G", "GS", "IP", "BF", "NP"]),
+    "Contact": ("How hard hitters square him up. All from Trackman.",
+                ["PLAYER", "THROWS", "IP", "Barrel%", "Hard-Hit%", "GB%"]),
 }
 
 # Short header labels for internal column names.
@@ -97,6 +114,8 @@ DECIMALS = {
     "K/BB": 2, "BB/K": 2, "P/PA": 2,
     "BB%": 1, "K%": 1, "xK%": 1, "xBB%": 1, "K-BB%": 1, "STR%": 1, "IP": 1,
 }
+# Every Trackman stat shows one decimal, except the two counts.
+DECIMALS.update({c: 1 for c in TRACKMAN_STATS if c not in ("Pitches", "BBE")})
 
 HELP = {
     "G": "Games", "PA": "Plate appearances", "AB": "At bats", "R": "Runs", "H": "Hits",
@@ -131,6 +150,7 @@ HELP = {
     "RISP_OPS": "OPS with runners in scoring position",
     "Home_OPS": "OPS at home", "Away_OPS": "OPS on the road",
 }
+HELP.update({stat: info[2] + ". From Trackman" for stat, info in TRACKMAN_STATS.items()})
 
 
 def format_cell(col, value):

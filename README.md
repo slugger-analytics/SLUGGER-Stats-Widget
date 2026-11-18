@@ -8,11 +8,11 @@ All data comes live from the iScore public API. There is no database and nothing
 
 - Select any ALPB team from a dropdown.
 - Switch between separate Hitters and Pitchers tabs. Hitters are sorted by plate appearances and pitchers by batters faced, so the players with the biggest workloads lead and tiny samples sink to the bottom.
-- Select a row to open a player card with that player's line, team rank, league percentile, a regressed skill estimate and a short usage note.
+- Select a row to open a player card with that player's line, team rank, league percentile, a full Trackman breakdown (plate discipline, contact, batted ball) and a regressed skill estimate.
 - Open the Team tab to see where a team ranks in the league on offense, pitching, defense and park effects.
 - Open the Findings tab for league research on what is skill and what is luck, with the strength of each result labeled.
-- Open Team Insights to set minimum playing time and cutoff lines, view a quadrant chart (plate discipline for hitters, strikeouts and walks for pitchers) and read rule-based insights.
-- Switch between views built the way scouting reports are. Hitters have Traditional, Slash Line, Power, Discipline, Advanced and Splits. Pitchers have Traditional, Rates, Advanced, Command, Splits and Workload. All shows every stat and Custom lets you pick your own.
+- Turn on "Compare two hitters" or "Compare two pitchers" under either table to put two players from any teams head to head, the way Baseball Savant does it. The stat sits in the middle with a bar for each player, a longer bar is always better (the lower ERA or K% gets the full bar), the better rate is green, and totals are shown in grey but never scored, because more playing time always means bigger totals. Player 1 starts on whichever row is selected.
+- Switch between views built the way scouting reports are. Hitters have Traditional, Slash Line, Power, Discipline, Advanced and Splits. Pitchers have Traditional, Rates, Advanced, Command, Splits, Workload and Contact. Power adds Trackman's Barrel%, EV90 (90th percentile exit velocity), Hard-Hit%, Avg EV and Max EV. Discipline adds Zone%, Swing%, Z-Swing%, Chase% (swings at pitches outside the zone), Contact% and Whiff%. Pitcher Rates adds FB Velo, Zone%, F-Strike%, Chase%, Whiff% and CSW%, and Contact shows Barrel%, Hard-Hit% and GB% allowed. All shows every stat and Custom lets you pick your own.
 - Click any column header to re-sort, for example by ERA or OPS, and hover a header for what the stat means.
 - Download the exact table you are looking at as a landscape PDF, ready to print for a scouting sheet or a pregame meeting.
 
@@ -33,7 +33,10 @@ Create a file named `.env` in the project root with the two identifiers the app 
 ```
 LEAGUE_GUID=your-league-guid
 SEASON_GUID=your-current-season-guid
+ALPB_API_KEY=your-slugger-trackman-key
 ```
+
+`ALPB_API_KEY` is the SLUGGER Trackman API key, the same one the pitching widget uses. Without it everything from iScore still works and the Trackman columns show "-" with a note. `TRACKMAN_START_DATE` and `TRACKMAN_END_DATE` (YYYY-MM-DD) set which dates count as the season and default to January 1 through December 31 of the current year. Set them before a new season starts, or the Trackman columns go blank on January 1.
 
 Then start the app.
 
@@ -69,6 +72,9 @@ The tests never contact iScore. They replace the network layer with a stub and d
 - `test_cache_ttls.py` checks that every cached function declares a time limit.
 - `test_season_filter.py` covers the current-season selection logic in `stats_utils.py`.
 - `test_metrics_and_league.py` covers the stat math, the multiple-testing correction, and the shape of the league report.
+- `test_advanced.py` checks every Trackman formula against hand-counted pitches, plus the iScore to Trackman name matching.
+- `test_player_card_and_compare.py` covers the player card, the Trackman columns in each view, a bad or missing Trackman feed, players split across several Trackman ids, and the head to head comparison.
+- `conftest.py` keeps a real `ALPB_API_KEY` in your `.env` out of every test.
 
 ## How it works
 
@@ -131,7 +137,10 @@ findings.py                   The Findings tab text, read from the league report
 charts.py                     Matplotlib figures
 display.py                    Column order, views, decimals, help text, palette
 report_pdf.py                 PDF export
-stats_utils.py                Season selection, quadrants and coaching notes, free of Streamlit
+stats_utils.py                Season selection, sample sizes and rankings, free of Streamlit
+advanced.py                   Trackman stat formulas and name matching, no Streamlit
+trackman.py                   Trackman API access and caching
+compare.py                    The head to head player comparison
 find_guids.py                 Standalone tool for finding league and season GUIDs
 scripts/                      Snapshot, report build, and offline preview tools
 data/league_baselines.json    Precomputed league context
@@ -159,6 +168,14 @@ The container serves under the path `/widgets/stats`, so open http://localhost:8
 `.github/workflows/deploy.yml` runs the test suite on every pull request into `main` and on every push to `main`. Deploys happen only from `main`, and only if the tests pass. A push that changes more than Markdown files then builds the image for amd64, pushes it to Amazon ECR, deploys it to the `slugger-stats-service` ECS Fargate service in the `slugger-cluster` cluster, and waits for the service to become stable. It then checks the Streamlit health endpoint through the public load balancer and fails the run if the app does not answer.
 
 The workflow signs in to AWS through GitHub OIDC, so no AWS keys are stored in the repository. It needs one repository secret, `AWS_DEPLOY_ROLE_ARN`. The service runs a single task on purpose, because Streamlit keeps a websocket open per visitor and one task keeps each session on one server.
+
+## Trackman advanced stats
+
+Every Trackman number comes from the SLUGGER pitch table (`/pitches` with `batter_id` or `pitcher_id`). The API can only be queried one player at a time, so a Trackman view loads every player on the team in parallel and caches the result for 30 minutes, and only when a view that shows those columns is open. The first load of a team is noticeably slower than the iScore views.
+
+A swing is a swinging strike, a foul or a ball in play. Contact is a foul or a ball in play. Undefined and intentional-ball pitches are dropped, and pitches without a tracked location count toward swing and whiff rates but not zone rates. Trackman does not record each batter's own strike zone, so a fixed zone is used for everyone, 1.5 to 3.5 feet high and 0.83 feet either side of the plate's center. A barrel needs at least 98 mph, with a launch angle window of 26 to 30 degrees that widens about a degree each way per extra mph, up to 8 to 50 degrees at 116 mph. That is close to Statcast's definition but not an exact copy.
+
+iScore and Trackman do not share player ids, so `advanced.match_player_ids` matches by name, in either "Last, First" or "First Last" order, ignoring accents and Jr or Sr. Trackman gives a player a new id for every team he plays for plus some ids with no team, so every id with exactly the same name is used and their pitches combined. A last name plus first initial match is only used when it points at one person. Players with no match show "-". The known risk is two different players with the exact same name in the same season, whose pitches would be combined.
 
 ## Known limits
 

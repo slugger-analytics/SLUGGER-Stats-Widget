@@ -8,7 +8,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from charts import era_fip_chart, quadrant_chart, team_bars
+import advanced as adv
+import trackman
+from charts import era_fip_chart, team_bars
+from compare import render_compare
 from data import (
     UpstreamError,
     enrich,
@@ -30,19 +33,7 @@ from display import (
 )
 from findings import render_findings
 from report_pdf import generate_pdf, pdf_filename
-from stats_utils import (
-    HITTER_QUADRANTS,
-    PITCHER_QUADRANTS,
-    classify_hitters,
-    classify_pitchers,
-    filter_min_sample,
-    hitter_actions,
-    ip_to_innings,
-    median_cut,
-    ordinal,
-    pitcher_actions,
-    rank_among,
-)
+from stats_utils import filter_min_sample, ip_to_innings, ordinal, rank_among
 
 st.set_page_config(page_title="ALPB Player Stats", layout="wide")
 
@@ -77,100 +68,35 @@ def stop_on_upstream_error(error):
 
 
 # -------------------
-# Quadrants and insights
+# Player card
 # -------------------
-def render_actions(notes):
-    """List the coaching notes grouped by quadrant."""
-    if not notes:
-        st.caption("No players to summarize.")
-        return
-    seen = []
-    for _, quadrant, _ in notes:
-        if quadrant not in seen:
-            seen.append(quadrant)
-    for quadrant in seen:
-        st.markdown(f"**{quadrant}**")
-        for name, q, action in notes:
-            if q == quadrant:
-                st.markdown(f"- {name}. {action}")
+# A player is ranked against teammates with at least this much playing time.
+MIN_PA = 20
+MIN_INNINGS = 5
 
 
-def render_quadrants(df, kind, key, team, highlight=None):
-    """Thresholds, a quadrant chart and rule-based insights for one table.
-
-    The minimum sample and the cutoff lines only shape the chart and the
-    insights. The table above keeps every player so nobody disappears from the
-    box score. Returns the context a player card needs to judge a player the
-    same way.
-    """
+def qualified(df, kind):
     if kind == "hitter":
-        size_label, size_max, size_default = "Minimum Plate Appearances", 250, 20
-        x_col, y_col = "K%", "BB%"
-        x_low_good, y_low_good = True, False
-        quad_map, digits = HITTER_QUADRANTS, 1
-        chart_title = "Plate Discipline"
-        classify, actions, step = classify_hitters, hitter_actions, 0.5
-    else:
-        size_label, size_max, size_default = "Minimum Innings Pitched", 60, 5
-        x_col, y_col = "K9", "BB9"
-        x_low_good, y_low_good = False, True
-        quad_map, digits = PITCHER_QUADRANTS, 2
-        chart_title = "Strikeouts and Walks"
-        classify, actions, step = classify_pitchers, pitcher_actions, 0.1
+        return filter_min_sample(df, "PA", MIN_PA)
+    return df[df["IP"].map(ip_to_innings) >= MIN_INNINGS]
 
-    view = df.copy()
-    if kind == "pitcher":
-        view["INN"] = view["IP"].map(ip_to_innings)
-        size_col = "INN"
-    else:
-        size_col = "PA"
 
-    with st.expander("Team Insights, Quadrants, and Thresholds", expanded=False):
-        st.caption("The minimum and cutoffs apply only to the chart and notes. "
-                   "The table lists every player.")
-        left, right = st.columns(2)
-        with left:
-            minimum = st.slider(size_label, 0, size_max, size_default, key=f"{key}_min")
-        with right:
-            cut_mode = st.radio("Cutoff Lines", ["Team Median", "Custom"],
-                                horizontal=True, key=f"{key}_cut_mode")
-
-        sample = filter_min_sample(view, size_col, minimum)
-        base = sample if not sample.empty else view
-        x_cut = median_cut(base[x_col], digits)
-        y_cut = median_cut(base[y_col], digits)
-        if cut_mode == "Custom":
-            c_left, c_right = st.columns(2)
-            with c_left:
-                x_cut = st.number_input(f"{x_col} Cutoff", value=float(x_cut), step=step,
-                                        key=f"{key}_x_cut_{team}")
-            with c_right:
-                y_cut = st.number_input(f"{y_col} Cutoff", value=float(y_cut), step=step,
-                                        key=f"{key}_y_cut_{team}")
-
-        classified = None
-        if sample.empty:
-            st.info(f"No players meet the minimum of {minimum}. Lower the threshold.")
-        else:
-            hidden = len(view) - len(sample)
-            if hidden:
-                st.caption(f"{hidden} player(s) below the minimum are excluded from the chart and insights.")
-            classified = classify(sample, x_cut, y_cut)
-            fig = quadrant_chart(classified, x_col, y_col, x_cut, y_cut,
-                                 x_low_good, y_low_good, x_col, y_col, quad_map,
-                                 highlight=highlight, title=chart_title)
-            st.pyplot(fig)
-            plt.close(fig)
-            st.caption("Dashed lines mark the cutoffs, and the strongest performers appear toward the upper right. "
-                       "A ringed point is the player selected in the table.")
-            st.markdown("**Actionable Insights**")
-            render_actions(actions(classified))
-
-    return {
-        "view": view, "sample": sample, "classified": classified,
-        "x_cut": x_cut, "y_cut": y_cut, "minimum": minimum, "size_col": size_col,
-        "classify": classify, "actions": actions,
-    }
+def render_trackman_tiles(name, kind):
+    """The player's full Trackman breakdown, grouped like a scouting report."""
+    st.markdown("**Trackman**")
+    summary, message = trackman.player_summary(name, kind)
+    if message:
+        st.caption(message)
+        return
+    groups = adv.HITTER_GROUPS if kind == "hitter" else adv.PITCHER_GROUPS
+    for group, stats in groups.items():
+        st.caption(group)
+        for slot, stat in zip(st.columns(len(stats)), stats):
+            with slot:
+                st.metric(stat, format_cell(stat, summary.get(stat)), help=HELP.get(stat))
+    st.caption(f"Zone stats use a fixed strike zone ({adv.ZONE_BOTTOM} to {adv.ZONE_TOP} ft "
+               f"high, {adv.ZONE_HALF_WIDTH} ft either side of center) because Trackman does "
+               "not record each batter's own zone.")
 
 
 # Stat tiles on a player card as (column, high_is_good). None means no ranking.
@@ -182,13 +108,8 @@ PITCHER_TILES = [("IP", None), ("ERA", False), ("FIP", False), ("WHIP", False),
 PERCENTILE_KEY = {"BABIP_A": "BABIP_A", "K-BB%": "K-BB%"}
 
 
-def render_player_card(player, ctx, kind, report):
-    """One player's line, team rank, league percentile, and a note on how to use them."""
-    view, sample = ctx["view"], ctx["sample"]
-    all_classified = ctx["classify"](view, ctx["x_cut"], ctx["y_cut"])
-    row = all_classified.loc[player.name]
-    reference = ctx["classified"] if ctx["classified"] is not None else all_classified
-    note = ctx["actions"](all_classified.loc[[player.name]], reference=reference)[0]
+def render_player_card(player, team_df, kind, report):
+    """One player's line, team rank, league percentile, Trackman breakdown and splits."""
 
     tiles = HITTER_TILES if kind == "hitter" else PITCHER_TILES
     hand = player.get("BATS") if kind == "hitter" else player.get("THROWS")
@@ -197,8 +118,10 @@ def render_player_card(player, ctx, kind, report):
 
     # Rank against the qualified players plus this one, so a small sample can
     # still be placed without dragging the whole group's ranks around.
-    pool = view.loc[[player.name]] if sample.empty else pd.concat(
-        [sample, view.loc[[player.name]]]).loc[lambda d: ~d.index.duplicated()]
+    sample = qualified(team_df, kind)
+    small = player.name not in sample.index
+    pool = pd.concat([sample, team_df.loc[[player.name]]])
+    pool = pool[~pool.index.duplicated()]
 
     group = "hitters" if kind == "hitter" else "pitchers"
     meta = (report or {}).get("meta", {})
@@ -208,9 +131,9 @@ def render_player_card(player, ctx, kind, report):
 
     with st.container(border=True):
         st.markdown(f"### {player['PLAYER']}")
-        st.caption(f"{hand_label} {hand}  |  {row['QUADRANT']}")
-        size = row[ctx["size_col"]]
-        if size < ctx["minimum"]:
+        st.caption(f"{hand_label} {hand}  |  Team ranks are among teammates with at least "
+                   + (f"{MIN_PA} PA." if kind == "hitter" else f"{MIN_INNINGS} IP."))
+        if small:
             st.warning("Small sample size. Interpret these figures and rankings with caution.")
 
         cols = st.columns(len(tiles))
@@ -233,7 +156,7 @@ def render_player_card(player, ctx, kind, report):
             st.caption(f"League percentiles need at least {qualifier} "
                        f"{'plate appearances' if kind == 'hitter' else 'batters faced'}.")
 
-        st.markdown(f"**{note[1]}.** {note[2]}")
+        render_trackman_tiles(player["PLAYER"], kind)
         _card_detail(player, kind, report)
 
 
@@ -298,8 +221,8 @@ def column_config_for(columns):
 
 
 def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
-                   view_key, picker_key, pdf_title, pdf_prefix, pdf_key, team, quad_kind,
-                   report):
+                   view_key, picker_key, pdf_title, pdf_prefix, pdf_key, team, kind,
+                   report, teams_df):
     """A heading, a row of views, one table, and a PDF of exactly that table.
 
     Views are never empty. Only Custom can be, and an empty selection must never
@@ -312,7 +235,7 @@ def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
         return
 
     df = df.sort_values(sort_col, ascending=False, kind="stable")
-    available = [c for c in all_cols if c in df.columns]
+    available = [c for c in all_cols if c in df.columns or c in adv.STAT_INFO]
 
     names = list(views) + ["All", "Custom"]
     view = st.segmented_control("View", names, default=names[0], key=view_key) or names[0]
@@ -331,9 +254,15 @@ def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
         shown = [c for c in cols if c in available]
 
     st.caption(f"{description} {note} Select a row to view the player card.")
+    # Trackman is only queried when a view that shows its columns is open.
+    if any(c in adv.STAT_INFO for c in shown):
+        df, message = trackman.add_columns(df, kind)
+        if message:
+            st.info(message)
     event = st.dataframe(
         df[shown], column_config=column_config_for(shown), width="stretch",
         height="content", hide_index=True, on_select="rerun",
+        placeholder="-",  # blank cells, e.g. no Trackman match, show "-" not "None"
         selection_mode="single-row", key=f"{view_key}_table_{team}")
 
     if shown:
@@ -347,12 +276,15 @@ def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
 
     rows = list(event.selection.rows) if event is not None else []
     picked = df.iloc[rows[0]] if rows and rows[0] < len(df) else None
-    card_slot = st.container()
-    ctx = render_quadrants(df, quad_kind, key=view_key, team=team,
-                           highlight=None if picked is None else picked["PLAYER"])
     if picked is not None:
-        with card_slot:
-            render_player_card(picked, ctx, quad_kind, report)
+        render_player_card(picked, df, kind, report)
+
+    # Off by default, so nobody pays for another team's load unless they ask.
+    st.divider()
+    if st.toggle(f"Compare two {title.lower()}", key=f"cmp_on_{kind}",
+                 help="Pick a player from any team on each side, like Baseball Savant's comparison."):
+        render_compare(teams_df, team, kind, report,
+                       default_player=None if picked is None else picked["PLAYER"])
 
 
 # -------------------
@@ -503,7 +435,7 @@ with hitters_tab:
         empty_msg="No batting data available.", view_key="hitter_view",
         picker_key="hitter_cols", pdf_title="Batting Season Stats",
         pdf_prefix="batting_season", pdf_key="pdf_batting_season",
-        team=selected_team, quad_kind="hitter", report=report)
+        team=selected_team, kind="hitter", report=report, teams_df=teams_df)
 
 with pitchers_tab:
     render_section(
@@ -512,7 +444,7 @@ with pitchers_tab:
         empty_msg="No pitching data available.", view_key="pitcher_view",
         picker_key="pitcher_cols", pdf_title="Pitcher Season Stats",
         pdf_prefix="pitcher_season", pdf_key="pdf_pitcher_season",
-        team=selected_team, quad_kind="pitcher", report=report)
+        team=selected_team, kind="pitcher", report=report, teams_df=teams_df)
 
 with team_tab:
     render_team_tab(selected_team, pitching_df, report)

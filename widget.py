@@ -372,17 +372,10 @@ def render_team_tab(team, pit, report):
             f"and {abs(m['park_HR'] - 100):.0f}% {'above' if m['park_HR'] > 100 else 'below'} in home runs "
             f"(home run margin of error about {m['park_HR_se']:.0f} points).")
 
-    views = {
-        "BABIP allowed": "Share of balls in play that fall for hits against each staff. The line is the "
-                         "league rate and lower is better. It blends defense, park and luck.",
-        "ERA vs FIP": "Each dot is a pitcher with 20 or more innings. Above the dashed line, ERA is worse "
-                      "than strikeouts, walks and homers predict. Below it, better.",
-        "Park effect": "Home wOBA as a percent of road wOBA. Above 100 favors hitters at home. "
-                       "A rough park factor, since it also reflects each roster.",
-        "Team ERA": "Earned runs per nine innings for each staff. The line is the league rate.",
-    }
-    view = st.radio("Chart", list(views), horizontal=True, key="team_chart")
-    chart_col, note_col = st.columns([3, 2])
+    views = ["BABIP allowed", "ERA vs FIP", "Park effect", "Team ERA"]
+    view = st.radio("Chart", views, horizontal=True, key="team_chart")
+    # Same width as before, without the note beside it.
+    chart_col, _ = st.columns([3, 2])
     fig = None
     with chart_col:
         if view == "BABIP allowed":
@@ -405,8 +398,6 @@ def render_team_tab(team, pit, report):
         if fig is not None:
             st.pyplot(fig)
             plt.close(fig)
-    with note_col:
-        st.caption(views[view])
 
 
 # -------------------

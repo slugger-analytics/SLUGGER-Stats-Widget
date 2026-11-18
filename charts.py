@@ -74,8 +74,8 @@ def era_fip_chart(pit: pd.DataFrame, highlight: str | None = None, title: str = 
         ax.annotate(short_name(r["PLAYER"]), (r["FIP"], r["ERA"]), xytext=(5, 4),
                     textcoords="offset points", fontsize=7, color=INK)
     ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
-    ax.set_xlabel("FIP (what his strikeouts, walks and homers say)", color=MUTED, fontsize=8)
-    ax.set_ylabel("ERA (what happened)", color=MUTED, fontsize=8)
+    ax.set_xlabel("FIP", color=MUTED, fontsize=8)
+    ax.set_ylabel("ERA", color=MUTED, fontsize=8)
     ax.text(0.03, 0.96, "ERA worse than FIP", transform=ax.transAxes, fontsize=8,
             color=QUAD_BAD, va="top", fontweight="bold")
     ax.text(0.97, 0.04, "ERA better than FIP", transform=ax.transAxes, fontsize=8,

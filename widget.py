@@ -389,7 +389,7 @@ def render_team_tab(team, pit, report):
             else:
                 st.info("Not enough pitchers with 20 or more innings.")
         elif view == "Park effect":
-            fig = team_bars(frame, "park_wOBA", "Home offense vs road offense (100 is neutral)", ".0f",
+            fig = team_bars(frame, "park_wOBA", "Home offense vs road offense", ".0f",
                             100, highlight=team, sort_ascending=False,
                             xlabel="Home wOBA as a percent of road wOBA")
         else:

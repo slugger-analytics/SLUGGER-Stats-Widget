@@ -11,3 +11,5 @@ tests
 .github
 .devcontainer
 find_guids.py
+data/snapshot_*.json
+scripts

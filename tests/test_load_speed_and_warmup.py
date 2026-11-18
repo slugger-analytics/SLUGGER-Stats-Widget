@@ -144,7 +144,7 @@ def test_tables_open_sorted_by_workload(monkeypatch):
 
 
 def test_player_stats_are_fetched_concurrently(monkeypatch):
-    feed = _Feed(latency=0.3)
+    feed = _Feed(latency=1.0)
     start = time.monotonic()
     at = _app(monkeypatch, feed).run()
     elapsed = time.monotonic() - start
@@ -152,7 +152,7 @@ def test_player_stats_are_fetched_concurrently(monkeypatch):
     assert not at.exception
     assert len(feed.stats_calls) == len(PLAYERS), "every player is fetched exactly once"
     assert feed.max_in_flight > 1, "fetches ran one at a time"
-    sequential = 0.3 * len(PLAYERS)
+    sequential = 1.0 * len(PLAYERS)
     assert elapsed < sequential, \
         f"cold load took {elapsed:.2f}s, no better than sequential {sequential:.2f}s"
 

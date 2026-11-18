@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 venv/
 venv/
+
+# Raw league snapshots are ~20 MB; only the derived report is committed
+data/snapshot_*.json

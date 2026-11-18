@@ -83,7 +83,7 @@ def compare_html(names, groups):
 
     parts = [f"""
 <style>
-.h2h {{ font-family: inherit; width: 100%; color: {INK}; }}
+.h2h {{ font-family: inherit; width: 100%; max-width: 900px; margin: 0 auto; color: {INK}; }}
 .h2h-row {{ display: grid; grid-template-columns: 72px 1fr 96px 1fr 72px;
             align-items: center; gap: 10px; padding: 4px 0; }}
 .h2h-head {{ font-weight: 700; font-size: 0.95rem; padding-bottom: 8px;

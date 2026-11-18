@@ -167,13 +167,25 @@ def _metric(at, label):
 
 
 # ---- player card -------------------------------------------------------------
-def test_compare_does_no_work_until_switched_on(monkeypatch):
+def test_page_loads_only_the_default_cards_trackman(monkeypatch):
+    """Without any clicks, Trackman is asked only for the player list and the
+    two default cards (top hitter, top pitcher). No comparison loads."""
     feed = Feed()
     at = _run(monkeypatch, feed=feed)
     assert not at.exception, at.exception
     assert [t.label for t in at.tabs] == ["Hitters", "Pitchers", "Team"]
-    assert feed.trackman_calls == []
+    asked = {(p.get("batter_id"), p.get("pitcher_id")) for name, p in feed.trackman_calls
+             if name == "pitches"}
+    assert asked == {("tm-bob", None), (None, "tm-pat")}
     assert not any(str(s.key).startswith("cmp_team") for s in at.selectbox)
+
+
+def test_right_column_shows_top_player_without_a_click(monkeypatch):
+    at = _run(monkeypatch)
+    assert not at.exception, at.exception
+    assert any(m.value == "### Batter, Bob" for m in at.markdown)
+    assert any(m.value == "### Pitcher, Pat" for m in at.markdown)
+    assert any("Select a row in the table to switch" in c.value for c in at.caption)
 
 
 def test_quadrant_section_is_gone(monkeypatch):
@@ -188,9 +200,10 @@ def test_hitter_card_shows_ranks_and_trackman_discipline(monkeypatch):
     assert not at.exception, at.exception
     assert any(m.value == "### Batter, Bob" for m in at.markdown)
     assert [m.label for m in at.metric][:3] == ["PA", "AVG", "OBP"]
-    assert _metric(at, "Chase%") == ["25.0"]
-    assert _metric(at, "Z-Swing%") == ["75.0"]
-    assert _metric(at, "Avg EV") == ["100.0"]
+    # The pitcher tab's card also shows Chase%, so the hitter card is the first.
+    assert _metric(at, "Chase%")[0] == "25.0"
+    assert _metric(at, "Z-Swing%")[0] == "75.0"
+    assert _metric(at, "Avg EV")[0] == "100.0"
 
 
 def test_small_sample_card_warns(monkeypatch):
@@ -211,7 +224,7 @@ def test_card_without_api_key_still_renders(monkeypatch):
 def test_pitcher_card_shows_csw(monkeypatch):
     at = _pick_row(_run(monkeypatch), "pitcher", 0)
     assert not at.exception, at.exception
-    assert _metric(at, "CSW%") == ["37.5"]
+    assert _metric(at, "CSW%")[0] == "37.5"   # key tile, repeated in the breakdown
 
 
 # ---- compare -----------------------------------------------------------------
@@ -251,7 +264,8 @@ def test_compare_defaults_to_two_teams_and_uses_normal_stats(monkeypatch):
     assert (a, b, winner) == ("0.950", "0.880", 0)
     assert bar_a == 100.0 and bar_b == pytest.approx(92.6)
     assert "Chase%" not in h2h["rows"]
-    assert feed.trackman_calls == []
+    # The comparison itself never asks Trackman about Sal.
+    assert not any(p.get("batter_id") == "tm-sal" for _, p in feed.trackman_calls)
 
 
 def test_lower_is_better_rates_pick_the_lower_value(monkeypatch):
@@ -279,7 +293,7 @@ def test_compare_starts_from_the_selected_row(monkeypatch):
 
 def test_compare_can_pick_another_player(monkeypatch):
     at = _open_compare(_run(monkeypatch))
-    at.selectbox(key="cmp_player_0_hitter_Lancaster Stormers_None").set_value("Batter, Al")
+    at.selectbox(key="cmp_player_0_hitter_Lancaster Stormers_Batter, Bob").set_value("Batter, Al")
     at = at.run()
     assert not at.exception, at.exception
     assert _h2h(at)["names"] == ["Batter, Al", "Slugger, Sal"]

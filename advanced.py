@@ -196,7 +196,7 @@ def hitter_advanced(pitches: pd.DataFrame) -> dict:
         return {}
     out = _discipline(df)
     first = df[df["first_pitch"]]
-    out["1st-Pitch Swing%"] = _pct(first["swing"].sum(), len(first))
+    out["F-Swing%"] = _pct(first["swing"].sum(), len(first))
     out.update(_batted_ball(df))
     return out
 
@@ -257,7 +257,7 @@ STAT_INFO = {
     "Contact%": (True, False, "Foul or fair contact per swing"),
     "Whiff%": (False, True, "Swings and misses per swing"),
     "SwStr%": (False, True, "Swings and misses per pitch"),
-    "1st-Pitch Swing%": (None, None, "Swings on 0-0 pitches"),
+    "F-Swing%": (None, None, "First-pitch swing rate, swings on 0-0 pitches"),
     "CSW%": (None, True, "Called strikes plus whiffs, per pitch"),
     "F-Strike%": (None, True, "0-0 pitches that became a strike or were put in play"),
     "FB Velo": (None, True, "Average release speed of fastballs and sinkers, mph"),
@@ -277,7 +277,7 @@ STAT_INFO = {
 
 HITTER_GROUPS = {
     "Plate Discipline": ["Pitches", "Zone%", "Swing%", "Z-Swing%", "Chase%",
-                         "1st-Pitch Swing%"],
+                         "F-Swing%"],
     "Contact": ["Z-Contact%", "O-Contact%", "Contact%", "Whiff%", "SwStr%"],
     "Batted Ball": ["BBE", "Barrel%", "EV90", "Hard-Hit%", "Avg EV", "Max EV",
                     "Avg LA", "Sweet-Spot%", "GB%", "LD%", "FB%"],
@@ -288,6 +288,14 @@ PITCHER_GROUPS = {
     "Swing and Miss": ["Swing%", "Chase%", "Z-Swing%", "Z-Contact%",
                        "Whiff%", "SwStr%"],
     "Contact Allowed": ["BBE", "Barrel%", "Avg EV", "Hard-Hit%", "Avg LA", "GB%", "LD%", "FB%"],
+}
+
+
+# The four Trackman numbers a coach looks at first, shown up front on the card.
+# The rest sit in a collapsed breakdown.
+KEY_STATS = {
+    "hitter": ["Chase%", "Whiff%", "Barrel%", "EV90"],
+    "pitcher": ["FB Velo", "CSW%", "Chase%", "Whiff%"],
 }
 
 

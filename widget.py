@@ -40,7 +40,7 @@ STYLE = """
 <style>
 #MainMenu, footer, header {visibility: hidden;}
 html {font-size: 14px;}
-.block-container {padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1080px;}
+.block-container {padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1440px;}
 h1 {font-size: 1.55rem !important; font-weight: 700; padding: 0 0 .35rem 0 !important;
     border-bottom: 2px solid #c62127; margin-bottom: .4rem;}
 h2, h3 {font-size: 1.05rem !important; font-weight: 650; margin: .4rem 0 .15rem 0 !important;
@@ -80,22 +80,36 @@ def qualified(df, kind):
     return df[df["IP"].map(ip_to_innings) >= MIN_INNINGS]
 
 
+def tile_rows(items, per_row=4):
+    """Yield ``(slot, item)`` pairs, ``per_row`` tiles to a row, so the card's
+    stat tiles stay readable in the narrow right-hand column."""
+    items = list(items)
+    for start in range(0, len(items), per_row):
+        chunk = items[start:start + per_row]
+        yield from zip(st.columns(per_row), chunk)
+
+
 def render_trackman_tiles(name, kind):
-    """The player's full Trackman breakdown, grouped like a scouting report."""
+    """Four key Trackman numbers up front, the full breakdown collapsed below,
+    so the card stays about as tall as the table beside it."""
     st.markdown("**Trackman**")
     summary, message = trackman.player_summary(name, kind)
     if message:
         st.caption(message)
         return
-    groups = adv.HITTER_GROUPS if kind == "hitter" else adv.PITCHER_GROUPS
-    for group, stats in groups.items():
-        st.caption(group)
-        for slot, stat in zip(st.columns(len(stats)), stats):
-            with slot:
-                st.metric(stat, format_cell(stat, summary.get(stat)), help=HELP.get(stat))
-    st.caption(f"Zone stats use a fixed strike zone ({adv.ZONE_BOTTOM} to {adv.ZONE_TOP} ft "
-               f"high, {adv.ZONE_HALF_WIDTH} ft either side of center) because Trackman does "
-               "not record each batter's own zone.")
+    for slot, stat in tile_rows(adv.KEY_STATS[kind]):
+        with slot:
+            st.metric(stat, format_cell(stat, summary.get(stat)), help=HELP.get(stat))
+    with st.expander("Full Trackman breakdown"):
+        groups = adv.HITTER_GROUPS if kind == "hitter" else adv.PITCHER_GROUPS
+        for group, stats in groups.items():
+            st.caption(group)
+            for slot, stat in tile_rows(stats):
+                with slot:
+                    st.metric(stat, format_cell(stat, summary.get(stat)), help=HELP.get(stat))
+        st.caption(f"Zone stats use a fixed strike zone ({adv.ZONE_BOTTOM} to {adv.ZONE_TOP} ft "
+                   f"high, {adv.ZONE_HALF_WIDTH} ft either side of center) because Trackman "
+                   "does not record each batter's own zone.")
 
 
 # Stat tiles on a player card as (column, high_is_good). None means no ranking.
@@ -135,8 +149,7 @@ def render_player_card(player, team_df, kind, report):
         if small:
             st.warning("Small sample size. Interpret these figures and rankings with caution.")
 
-        cols = st.columns(len(tiles))
-        for slot, (col, high_good) in zip(cols, tiles):
+        for slot, (col, high_good) in tile_rows(tiles):
             with slot:
                 st.metric(col, format_cell(col, player.get(col)), help=HELP.get(col))
                 if high_good is not None:
@@ -236,6 +249,34 @@ def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
     df = df.sort_values(sort_col, ascending=False, kind="stable")
     available = [c for c in all_cols if c in df.columns or c in adv.STAT_INFO]
 
+    # Table on the left, the selected player on the right, so the page reads
+    # across instead of one long scroll. The comparison goes underneath.
+    left, right = st.columns([3, 2], gap="large")
+    with left:
+        event, df = _render_table(df, available, views, note, view_key, picker_key,
+                                  pdf_title, pdf_prefix, pdf_key, team, kind)
+
+    rows = list(event.selection.rows) if event is not None else []
+    chosen = rows and rows[0] < len(df)
+    # With nothing selected, show the top player so the right side is never empty.
+    picked = df.iloc[rows[0]] if chosen else df.iloc[0]
+    with right:
+        if not chosen:
+            st.caption("Showing the top player. Select a row in the table to switch.")
+        render_player_card(picked, df, kind, report)
+
+    # The comparison spans the full width under both columns. Off by default,
+    # so nobody pays for another team's load unless they ask.
+    st.divider()
+    if st.toggle(f"Compare two {title.lower()}", key=f"cmp_on_{kind}",
+                 help="Pick a player from any team on each side, like Baseball Savant's comparison."):
+        render_compare(teams_df, team, kind, report, default_player=picked["PLAYER"])
+
+
+def _render_table(df, available, views, note, view_key, picker_key,
+                  pdf_title, pdf_prefix, pdf_key, team, kind):
+    """The view buttons, the table and its PDF. Returns the selection event and
+    the table as shown, with Trackman columns added when the view needs them."""
     names = list(views) + ["All", "Custom"]
     view = st.segmented_control("View", names, default=names[0], key=view_key) or names[0]
 
@@ -252,7 +293,7 @@ def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
         description, cols = views[view]
         shown = [c for c in cols if c in available]
 
-    st.caption(f"{description} {note} Select a row to view the player card.")
+    st.caption(f"{description} {note} Select a row to see that player on the right.")
     # Trackman is only queried when a view that shows its columns is open.
     if any(c in adv.STAT_INFO for c in shown):
         df, message = trackman.add_columns(df, kind)
@@ -272,18 +313,7 @@ def render_section(df, *, title, all_cols, views, sort_col, note, empty_msg,
             file_name=pdf_filename(pdf_prefix), mime="application/pdf", key=pdf_key)
     else:
         st.caption("Pick at least one column to export a PDF.")
-
-    rows = list(event.selection.rows) if event is not None else []
-    picked = df.iloc[rows[0]] if rows and rows[0] < len(df) else None
-    if picked is not None:
-        render_player_card(picked, df, kind, report)
-
-    # Off by default, so nobody pays for another team's load unless they ask.
-    st.divider()
-    if st.toggle(f"Compare two {title.lower()}", key=f"cmp_on_{kind}",
-                 help="Pick a player from any team on each side, like Baseball Savant's comparison."):
-        render_compare(teams_df, team, kind, report,
-                       default_player=None if picked is None else picked["PLAYER"])
+    return event, df
 
 
 # -------------------

@@ -48,7 +48,7 @@ def test_zone_swing_and_contact_rates():
     assert s["Z-Contact%"] == pytest.approx(66.7)
     assert s["O-Contact%"] == 0.0
     assert s["SwStr%"] == 25.0
-    assert s["1st-Pitch Swing%"] == 0.0
+    assert s["F-Swing%"] == 0.0
 
 
 def test_batted_ball_uses_only_balls_in_play():

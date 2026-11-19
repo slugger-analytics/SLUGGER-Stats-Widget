@@ -3,8 +3,8 @@
 ``build_league_report`` turns ``data/snapshot_*.json`` (written by
 ``scripts/snapshot_league.py``) into ``data/league_baselines.json``, a small
 file the widget ships with. It holds the league rates every comparison needs,
-percentile tables, park factors, team defense, and the research findings shown
-on the Findings tab.
+percentile tables, park factors, team defense, and the research behind the
+Team tab and the league percentiles.
 
 Why a file and not a live computation: league context needs all ~530 players,
 which is ~550 iScore calls. The widget loads one team at a time, so it reads

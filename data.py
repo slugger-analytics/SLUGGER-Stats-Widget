@@ -95,6 +95,11 @@ def fetch_all_player_stats(player_guids):
     once per thread. The first UpstreamError propagates out of ``pool.map``,
     which fails the whole build and keeps a partial team out of the cache.
     """
+    return threaded_map(get_player_stats, player_guids)
+
+
+def threaded_map(fn, items):
+    """``map`` over a thread pool with Streamlit's run context attached."""
     ctx = get_script_run_ctx()
 
     def _attach():
@@ -102,7 +107,7 @@ def fetch_all_player_stats(player_guids):
             add_script_run_ctx(threading.current_thread(), ctx)
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS, initializer=_attach) as pool:
-        return list(pool.map(get_player_stats, player_guids))
+        return list(pool.map(fn, items))
 
 
 @st.cache_data(ttl=1800)

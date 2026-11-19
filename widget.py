@@ -380,8 +380,7 @@ def render_team_tab(team, pit, report):
     with chart_col:
         if view == "BABIP allowed":
             fig = team_bars(frame, "def_BABIP", "BABIP allowed, by team", ".3f", base["pit_BABIP"],
-                            highlight=team, sort_ascending=True,
-                            xlabel="Lower is better. Line is the league rate.")
+                            highlight=team, sort_ascending=True)
         elif view == "ERA vs FIP":
             qualified = pit[pit["INN"] >= 20] if pit is not None and not pit.empty else None
             if qualified is not None and len(qualified) >= 3:
@@ -390,11 +389,10 @@ def render_team_tab(team, pit, report):
                 st.info("Not enough pitchers with 20 or more innings.")
         elif view == "Park effect":
             fig = team_bars(frame, "park_wOBA", "Home offense vs road offense", ".0f",
-                            100, highlight=team, sort_ascending=False,
-                            xlabel="Home wOBA as a percent of road wOBA")
+                            100, highlight=team, sort_ascending=False)
         else:
             fig = team_bars(frame, "ERA", "Team ERA", ".2f", base["ERA"], highlight=team,
-                            sort_ascending=True, xlabel="Lower is better. Line is the league rate.")
+                            sort_ascending=True)
         if fig is not None:
             st.pyplot(fig)
             plt.close(fig)
